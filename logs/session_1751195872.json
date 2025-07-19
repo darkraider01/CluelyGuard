@@ -1,0 +1,8 @@
+{
+  "timestamp": "2025-06-29T16:47:52",
+  "mic_usage_detected": false,
+  "suspicious_processes": [
+    "/home/brandybuck/projects/anticheat/cluelyguard/target/debug/cluelyguard"
+  ],
+  "bam": null
+}

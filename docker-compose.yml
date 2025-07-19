@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  cluelyguard:
+    build: .
+    container_name: cluelyguard
+    restart: unless-stopped
+    # The daemon now sends logs directly to the teacher's PC
+    # and runs with root privileges for system-level monitoring.
+    # No ports are exposed by default.
+    # Volumes for logs and data are managed by the daemon internally or sent externally.
+    environment:
+      # Example: Set the student code for this Docker container
+      - STUDENT_CODE=docker-student-1
+      # Ensure the daemon runs as root inside the container
+      - CLUELYGUARD_RUN_AS_ROOT=true
+    # For advanced system monitoring, the container needs privileged access
+    privileged: true
+    # Mount /dev/shm for shared memory access, often needed for some monitoring
+    volumes:
+      - /dev/shm:/dev/shm
+    # If you need to access host network for DPI, use network_mode: "host"
+    # network_mode: "host"

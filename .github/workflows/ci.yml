@@ -1,0 +1,209 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3 python3-pip libpulse-dev pkg-config
+    
+    - name: Install Python dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        pip3 install joblib numpy scikit-learn
+    
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+    
+    - name: Run tests
+      run: cargo test --verbose
+    
+    - name: Run clippy
+      run: cargo clippy -- -D warnings
+    
+    - name: Check formatting
+      run: cargo fmt -- --check
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3 python3-pip libpulse-dev pkg-config
+    
+    - name: Install Python dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        pip3 install joblib numpy scikit-learn
+    
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+    
+    - name: Build release
+      run: cargo build --release
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: cluelyguard-binaries
+        path: |
+          target/release/cluelyguard
+          target/release/cluelyguard-daemon
+
+  docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: cluelyguard-binaries
+        path: target/release/
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Login to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        push: true
+        tags: |
+          yourusername/cluelyguard:latest
+          yourusername/cluelyguard:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+    if: github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: cluelyguard-binaries
+        path: target/release/
+    
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Release v${{ github.run_number }}
+        body: |
+          ## Changes
+          - Automated release from CI/CD pipeline
+          
+          ## Downloads
+          - Linux x64 binaries available in artifacts
+          - Docker image: `yourusername/cluelyguard:v${{ github.run_number }}`
+        draft: false
+        prerelease: false
+    
+    - name: Upload Release Assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./target/release/cluelyguard
+        asset_name: cluelyguard-linux-x64
+        asset_content_type: application/octet-stream
+    
+    - name: Upload Release Assets (Daemon)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./target/release/cluelyguard-daemon
+        asset_name: cluelyguard-daemon-linux-x64
+        asset_content_type: application/octet-stream 

@@ -1,0 +1,142 @@
+# CluelyGuard Configuration
+# Industrial-grade Linux Anti-LLM Proctoring System
+
+# Application settings
+app:
+  name: "CluelyGuard"
+  version: "0.1.0"
+  environment: "production"  # development, staging, production
+  teacher_pc_port: 8000
+  log_level: "info"  # trace, debug, info, warn, error
+
+# Database configuration removed - using file-based logging instead
+
+# Web API settings
+web:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  cors:
+    allowed_origins: ["*"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE"]
+    allowed_headers: ["*"]
+
+# Monitoring settings
+monitoring:
+  # Real-time BAM detection
+  bam:
+    enabled: true
+    check_interval_seconds: 5
+    typing_sample_size: 100
+    anomaly_threshold: 0.7
+    model_path: "bam_model.joblib"
+  
+  # Process monitoring
+  process:
+    enabled: true
+    scan_interval_seconds: 30
+    suspicious_binaries:
+      # Known AI chat tools
+      - "chatgpt"
+      - "claude"
+      - "bard"
+      - "gpt"
+      - "openai"
+      - "anthropic"
+      - "copilot"
+      - "github-copilot"
+      - "tabnine"
+      - "kite"
+      - "intellicode"
+      - "codeium"
+      
+      # AI assistants and helpers
+      - "assistant"
+      - "ai-assistant"
+      - "ai-helper"
+      - "bot"
+      - "ai-bot"
+      
+      # Voice and speech tools
+      - "whisper"
+      - "speech-to-text"
+      - "voice-to-text"
+      - "dictation"
+      - "transcription"
+      
+      # Development AI tools
+      - "cursor"
+      - "replit"
+      - "codespaces"
+      - "gitpod"
+      - "stackblitz"
+      
+      # Custom/stealth tools (from original config)
+      - "cluely"
+      - "cluely.bin"
+      - "stealth_assistant"
+  
+  # Audio monitoring
+  audio:
+    enabled: true
+    check_interval_seconds: 10
+    pulse_audio_timeout_ms: 1000
+
+  ram_dump:
+    enabled: true
+    interval_seconds: 300  # 5 minutes
+    auto_dump_on_suspicion: true
+    max_dumps_per_session: 10
+
+# Alerting configuration
+alerts:
+  enabled: true
+  webhook_url: null  # Set to your webhook URL if needed
+  email:
+    smtp_server: "localhost"
+    smtp_port: 587
+    username: ""
+    password: ""
+    recipients: []
+  
+  # Alert thresholds
+  thresholds:
+    bam_anomaly_score: 0.8
+    suspicious_process_count: 1
+    mic_usage_duration_seconds: 30
+
+# Security settings
+security:
+  api_key_required: false
+  jwt_secret: "your-secret-key-here"
+  session_timeout_minutes: 60
+  rate_limit:
+    requests_per_minute: 100
+    burst_size: 10
+
+# Storage settings
+storage:
+  logs_dir: "logs"
+  data_dir: "data"
+  max_log_size_mb: 100
+  log_retention_days: 30
+  ram_dump_retention_days: 7
+
+# Integration settings
+integrations:
+  # External monitoring systems
+  prometheus:
+    enabled: false
+    port: 9090
+  
+  # SIEM integration
+  siem:
+    enabled: false
+    endpoint: ""
+    api_key: ""
+  
+  # Cloud monitoring
+  cloudwatch:
+    enabled: false
+    region: "us-east-1"
+    log_group: "cluelyguard" 

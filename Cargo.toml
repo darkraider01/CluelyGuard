@@ -1,0 +1,56 @@
+[package]
+name = "cluelyguard"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "Industrial-grade Linux Anti-LLM Proctoring System"
+license = "MIT"
+repository = "https://github.com/yourusername/cluelyguard"
+keywords = ["security", "anti-cheat", "proctoring", "ai-detection"]
+categories = ["security", "command-line-utilities"]
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+procfs = "0.15"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+libpulse-binding = "2.27.1"
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+config = "0.14"
+serde_yaml = "0.9"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+thiserror = "1.0"
+anyhow = "1.0"
+futures = "0.3"
+crossbeam-channel = "0.5"
+notify = "6.1"
+base64 = "0.21"
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = "0.12"
+
+[features]
+default = []
+full = []
+
+
+
+[lib]
+name = "cluelyguard"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cluelyguard"
+path = "src/main.rs"
+
+[[bin]]
+name = "cluelyguard-daemon"
+path = "src/daemon.rs"
