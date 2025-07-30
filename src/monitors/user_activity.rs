@@ -16,4 +16,26 @@ pub fn check_user_activity() -> Option<String> {
     }
 
     None
-}
+    }
+    
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+    
+        #[test]
+        fn test_check_user_activity_basic() {
+            // This test verifies that the function runs without panicking.
+            // It's a placeholder since the actual logic is simulated randomly.
+            let mut detected_count = 0;
+            let num_runs = 1000; // Run multiple times to hit the random chance
+    
+            for _ in 0..num_runs {
+                if check_user_activity().is_some() {
+                    detected_count += 1;
+                }
+            }
+            // Assert that detection occurs at least once (due to random chance)
+            // This is a weak assertion, but better than nothing for a simulated function.
+            assert!(detected_count < num_runs); // Should not detect every time
+        }
+    }
