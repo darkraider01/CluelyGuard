@@ -95,3 +95,26 @@ pub fn check() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_no_mic_usage_detected() {
+        // This test assumes a clean PulseAudio environment where no applications are
+        // actively using the microphone. It primarily checks that the `check()`
+        // function executes without panicking and returns Ok.
+        // Mocking libpulse-binding is extremely complex and outside the scope
+        // of a simple unit test here.
+        let result = check();
+        assert!(result.is_ok(), "Mic check should pass if no mic usage is detected: {:?}", result.err());
+    }
+
+    // To test actual mic usage detection, a more sophisticated integration test
+    // environment would be needed, potentially involving:
+    // - A virtual audio device.
+    // - A separate process simulating mic usage (e.g., recording audio).
+    // - Capturing stdout/stderr to verify the "Mic used by" message.
+    // This is beyond the scope of a unit test within the current setup.
+}
