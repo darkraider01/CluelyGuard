@@ -52,7 +52,7 @@ mod tests {
 
     #[test]
     fn test_network_monitor_new() {
-        let monitor = NetworkMonitor::new();
+        let _monitor = NetworkMonitor::new();
         // No fields to assert, just ensure it can be constructed
     }
 

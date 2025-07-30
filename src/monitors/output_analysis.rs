@@ -16,4 +16,23 @@ pub fn analyze_output(output: &str) -> Option<String> {
     }
 
     None
-}
+    }
+    
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+    
+        #[test]
+        fn test_analyze_output_llm_phrases() {
+            assert_eq!(analyze_output("This is a test as an ai language model."), Some("Output contains common LLM phrases.".to_string()));
+            assert_eq!(analyze_output("I am a large language model, this is a test."), Some("Output contains common LLM phrases.".to_string()));
+            assert_eq!(analyze_output("As An Ai Language Model, hello."), Some("Output contains common LLM phrases.".to_string()));
+        }
+    
+        #[test]
+        fn test_analyze_output_no_llm_phrases() {
+            assert_eq!(analyze_output("This is a normal sentence."), None);
+            assert_eq!(analyze_output("Hello world!"), None);
+            assert_eq!(analyze_output(""), None); // Empty string should not trigger detection
+        }
+    }
