@@ -160,3 +160,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    // CLI command tests are currently skipped due to complexity in mocking global statics and external commands.
+    // Comprehensive testing of CLI commands would require:
+    // - Mocking `std::process::Command` to control spawned processes.
+    // - Capturing `stdout` and `stderr` to verify output.
+    // - Simulating different command-line arguments and their effects.
+    // For now, relying on higher-level integration tests for CLI command functionality.
+}

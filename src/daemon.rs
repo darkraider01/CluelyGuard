@@ -186,3 +186,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    // Daemon tests are currently skipped due to complexity in mocking global statics and external dependencies.
+    // Comprehensive testing of the daemon's behavior would require significant refactoring for dependency injection
+    // or a more advanced testing harness that can simulate system interactions.
+    // These tests would ideally cover:
+    // - Daemon startup with valid/invalid configurations.
+    // - Background monitoring loop and its interaction with various monitors.
+    // - Graceful shutdown.
+    // - Verification of logging and network communication (with mocked FileLogger and NetworkClient).
+    // For now, relying on higher-level integration tests for daemon functionality.
+}
