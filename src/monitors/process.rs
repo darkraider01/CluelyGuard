@@ -697,4 +697,91 @@ mod tests {
         assert!(result.scan_duration_ms > 0);
         assert!(result.total_processes_scanned > 0);
     }
+
+    // Test analyze_process with various scenarios
+    // Note: Mocking procfs::process::Process is complex without a dedicated mocking library
+    // that can mock external types. These tests are conceptual and would require such a setup.
+
+    // Helper to create a dummy process (conceptual)
+    // fn create_dummy_process(pid: i32, name: &str, exe: &str, cmdline: &[&str]) -> procfs::process::Process {
+    //     // This is a placeholder. Real implementation would involve creating a mock for procfs::process::Process
+    //     unimplemented!()
+    // }
+
+    // #[test]
+    // fn test_analyze_process_configured_binary() {
+    //     let config = create_test_config();
+    //     let proc = create_dummy_process(1, "test_ai_tool", "/usr/bin/test_ai_tool", &[]);
+    //     let suspicious = analyze_process(&proc, &config.monitoring.process.suspicious_binaries, &get_ai_patterns(), &get_ai_keywords()).unwrap();
+    //     assert!(matches!(suspicious.reason, SuspicionReason::MatchesConfiguredBinary(_)));
+    //     assert_eq!(suspicious.confidence, 0.9);
+    // }
+
+    // #[test]
+    // fn test_analyze_process_ai_pattern() {
+    //     let config = create_test_config();
+    //     let proc = create_dummy_process(2, "chatgpt", "/opt/chatgpt", &[]);
+    //     let suspicious = analyze_process(&proc, &config.monitoring.process.suspicious_binaries, &get_ai_patterns(), &get_ai_keywords()).unwrap();
+    //     assert!(matches!(suspicious.reason, SuspicionReason::MatchesAiPattern(_)));
+    //     assert_eq!(suspicious.confidence, 0.95);
+    // }
+
+    // #[test]
+    // fn test_analyze_process_ai_keywords() {
+    //     let config = create_test_config();
+    //     let proc = create_dummy_process(3, "my_app", "/usr/local/bin/my_ai_helper", &[]);
+    //     let suspicious = analyze_process(&proc, &config.monitoring.process.suspicious_binaries, &get_ai_patterns(), &get_ai_keywords()).unwrap();
+    //     assert!(matches!(suspicious.reason, SuspicionReason::HasAiKeywords(_)));
+    //     assert_eq!(suspicious.confidence, 0.7);
+    // }
+
+    // #[test]
+    // fn test_analyze_process_command_line() {
+    //     let config = create_test_config();
+    //     let proc = create_dummy_process(4, "python3", "/usr/bin/python3", &["-m", "openai.chat"]);
+    //     let suspicious = analyze_process(&proc, &config.monitoring.process.suspicious_binaries, &get_ai_patterns(), &get_ai_keywords()).unwrap();
+    //     assert!(matches!(suspicious.reason, SuspicionReason::SuspiciousCommandLine(_)));
+    //     assert_eq!(suspicious.confidence, 0.6);
+    // }
+
+    // #[test]
+    // fn test_is_stealth_ai_tool() {
+    //     assert!(is_stealth_ai_tool("my_helper", "/opt/my_helper"));
+    //     assert!(!is_stealth_ai_tool("systemd", "/usr/lib/systemd"));
+    // }
+
+    // #[test]
+    // fn test_is_legitimate_system_process() {
+    //     assert!(is_legitimate_system_process("chrome", "/opt/google/chrome"));
+    //     assert!(!is_legitimate_system_process("my_ai_tool", "/usr/local/bin/my_ai_tool"));
+    // }
+
+    // #[test]
+    // fn test_has_unusual_network_activity() {
+    //     assert!(!has_unusual_network_activity(123)); // Placeholder, always false
+    // }
+
+    // #[test]
+    // fn test_has_high_cpu_low_interaction() {
+    //     // Requires a mock procfs::process::Process which is complex
+    //     // assert!(!has_high_cpu_low_interaction(&create_dummy_process(1, "", "", &[]))); // Placeholder, always false
+    // }
+
+    // #[test]
+    // fn test_has_suspicious_file_access() {
+    //     // Requires a mock procfs::process::Process which is complex
+    //     // assert!(!has_suspicious_file_access(&create_dummy_process(1, "", "", &[]))); // Placeholder, always false
+    // }
+
+    // #[test]
+    // fn test_has_unusual_memory_patterns() {
+    //     // Requires a mock procfs::process::Process which is complex
+    //     // assert!(!has_unusual_memory_patterns(&create_dummy_process(1, "", "", &[]))); // Placeholder, always false
+    // }
+
+    // #[test]
+    // fn test_has_suspicious_timing() {
+    //     // Requires a mock procfs::process::Process which is complex
+    //     // assert!(!has_suspicious_timing(&create_dummy_process(1, "", "", &[]))); // Placeholder, always false
+    // }
 }
