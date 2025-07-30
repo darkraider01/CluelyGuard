@@ -182,8 +182,6 @@ impl BamMonitor {
         })
     }
 
-    
-
     async fn create_ai_alert(&self, result: &BamDetectionResult) -> BamResult<()> {
         let alert = AlertLog {
             id: Uuid::new_v4().to_string(),
@@ -291,3 +289,13 @@ impl BamMonitoringService {
         self.monitors.keys().cloned().collect()
     }
 } 
+
+#[cfg(test)]
+mod tests {
+    // These tests are currently skipped due to complexity in mocking external process execution (`std::process::Command`)
+    // and global filesystem operations. Comprehensive testing would require:
+    // - Mocking `std::process::Command` to control the output of `bam/bam.py`.
+    // - Mocking `std::fs::read_to_string` to control the content of the JSON log file.
+    // - Setting up a virtual filesystem for isolated log file operations.
+    // For now, relying on higher-level integration tests for BAM functionality.
+}
