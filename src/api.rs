@@ -1,5 +1,5 @@
 use crate::config::AppConfig;
-use crate::logger::FileLogger;
+use crate::logger::{FileLogger, SessionLog, AlertLog, BamResultLog};
 use crate::monitors::bam_realtime::BamMonitoringService;
 use axum::{
     extract::{Path, Query, State},
@@ -394,3 +394,668 @@ impl ApiServer {
         Ok(Json(response))
     }
 } 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt; // for `call`, `oneshot`, and `ready`
+    use mockall::predicate::*;
+    use mockall::*;
+    use chrono::{Utc, TimeZone};
+    use serde_json::json;
+
+    // Mock for AppConfig
+    mock! {
+        pub AppConfig {}
+        impl AppConfig for AppConfig {
+            fn load(path: Option<&PathBuf>) -> Result<Self, config::ConfigError>;
+            fn validate(&self) -> Result<(), Vec<String>>;
+            fn is_development(&self) -> bool;
+            fn is_production(&self) -> bool;
+        }
+        trait AppConfigTrait {
+            fn load(path: Option<&PathBuf>) -> Result<MockAppConfig, config::ConfigError>;
+        }
+        impl AppConfigTrait for MockAppConfig {
+            fn load(path: Option<&PathBuf>) -> Result<MockAppConfig, config::ConfigError> {
+                let mut mock = MockAppConfig::new();
+                mock.expect_load()
+                    .return_once(|_| {
+                        Ok(MockAppConfig::default())
+                    });
+                Ok(mock)
+            }
+        }
+    }
+
+    // Mock for FileLogger
+    mock! {
+        pub FileLogger {}
+        impl FileLogger for FileLogger {
+            fn new(config: Arc<AppConfig>) -> Result<Self, std::io::Error>;
+            fn append_to_log_file(&self, log_entry: &str) -> Result<(), std::io::Error>;
+            fn log_session(&self, session: &SessionLog) -> Result<(), std::io::Error>;
+            fn log_alert(&self, alert: &AlertLog) -> Result<(), std::io::Error>;
+            fn log_bam_result(&self, result: &BamResultLog) -> Result<(), std::io::Error>;
+            fn log_ram_dump(&self, dump: &RamDumpLog) -> Result<(), std::io::Error>;
+            fn get_sessions(&self) -> Result<Vec<SessionLog>, std::io::Error>;
+            fn get_alerts(&self) -> Result<Vec<AlertLog>, std::io::Error>;
+            fn get_bam_results(&self) -> Result<Vec<BamResultLog>, std::io::Error>;
+            fn get_ram_dumps(&self) -> Result<Vec<RamDumpLog>, std::io::Error>;
+            fn get_session_alerts(&self, session_id: &str) -> Result<Vec<AlertLog>, std::io::Error>;
+            fn get_session_bam_results(&self, session_id: &str) -> Result<Vec<BamResultLog>, std::io::Error>;
+            fn get_session_ram_dumps(&self, session_id: &str) -> Result<Vec<RamDumpLog>, std::io::Error>;
+            fn create_ram_dump(session_id: &str, student_code: &str) -> Result<RamDumpLog, Box<dyn std::error::Error>>;
+        }
+    }
+
+    // Mock for BamMonitoringService
+    mock! {
+        pub BamMonitoringService {}
+        impl BamMonitoringService for BamMonitoringService {
+            fn new(config: Arc<AppConfig>, file_logger: Arc<FileLogger>, ram_dumper: Arc<RamDumpLog>) -> Self;
+            fn start_session_monitoring(&mut self, session_id: String) -> Result<(), Box<dyn std::error::Error>>;
+            fn stop_session_monitoring(&mut self, session_id: &str);
+            fn is_monitoring(&self, session_id: &str) -> bool;
+            fn get_active_sessions(&self) -> Vec<String>;
+        }
+    }
+
+    // Helper to create a test ApiState with mocks
+    fn create_test_api_state() -> ApiState {
+        let mut mock_config = MockAppConfig::new();
+        mock_config.expect_app().return_const(crate::config::AppSettings {
+            name: "TestApp".to_string(),
+            version: "1.0.0".to_string(),
+            environment: "test".to_string(),
+            log_level: "info".to_string(),
+            teacher_pc_port: 8081,
+        });
+
+        let mock_file_logger = MockFileLogger::new();
+        let mut mock_bam_service = MockBamMonitoringService::new();
+        mock_bam_service.expect_new().return_once(|_, _, _| MockBamMonitoringService::default());
+
+
+        ApiState {
+            config: Arc::new(mock_config),
+            bam_service: Arc::new(RwLock::new(mock_bam_service)),
+            file_logger: Arc::new(mock_file_logger),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_health_endpoint() {
+        let state = create_test_api_state();
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "healthy");
+        assert_eq!(json["service"], "CluelyGuard API");
+        assert!(json["timestamp"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_status_endpoint() {
+        let state = create_test_api_state();
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(Request::builder().uri("/status").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let status_response: StatusResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(status_response.status, "operational");
+        assert_eq!(status_response.version, "1.0.0");
+        assert_eq!(status_response.uptime_seconds, 0); // TODO: Implement uptime tracking
+    }
+
+    #[tokio::test]
+    async fn test_create_session_endpoint() {
+        let state = create_test_api_state();
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(json!({"description": "Test session"}).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let create_session_response: CreateSessionResponse = serde_json::from_slice(&body).unwrap();
+        assert!(!create_session_response.session_id.is_empty());
+        assert_eq!(create_session_response.status, "active");
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_endpoint() {
+        let mut mock_file_logger = MockFileLogger::new();
+        mock_file_logger.expect_get_sessions()
+            .return_once(|| {
+                Ok(vec![
+                    SessionLog {
+                        id: "session1".to_string(),
+                        started_at: Utc.timestamp_opt(1678886400, 0).unwrap(),
+                        ended_at: None,
+                        status: "active".to_string(),
+                        mic_usage_detected: false,
+                        suspicious_processes: vec![],
+                        bam_anomaly_score: None,
+                        bam_is_ai_like: None,
+                        created_at: Utc.timestamp_opt(1678886400, 0).unwrap(),
+                        updated_at: Utc.timestamp_opt(1678886400, 0).unwrap(),
+                    },
+                    SessionLog {
+                        id: "session2".to_string(),
+                        started_at: Utc.timestamp_opt(1678886500, 0).unwrap(),
+                        ended_at: Some(Utc.timestamp_opt(1678886600, 0).unwrap()),
+                        status: "ended".to_string(),
+                        mic_usage_detected: true,
+                        suspicious_processes: vec!["process_x".to_string()],
+                        bam_anomaly_score: Some(0.9),
+                        bam_is_ai_like: Some(true),
+                        created_at: Utc.timestamp_opt(1678886500, 0).unwrap(),
+                        updated_at: Utc.timestamp_opt(1678886600, 0).unwrap(),
+                    },
+                ])
+            });
+
+        let mut mock_config = MockAppConfig::new();
+        mock_config.expect_app().return_const(crate::config::AppSettings {
+            name: "TestApp".to_string(),
+            version: "1.0.0".to_string(),
+            environment: "test".to_string(),
+            log_level: "info".to_string(),
+            teacher_pc_port: 8081,
+        });
+
+        let mock_bam_service = MockBamMonitoringService::new();
+
+        let state = ApiState {
+            config: Arc::new(mock_config),
+            bam_service: Arc::new(RwLock::new(mock_bam_service)),
+            file_logger: Arc::new(mock_file_logger),
+        };
+
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(Request::builder().uri("/sessions").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let sessions_response: Vec<SessionResponse> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(sessions_response.len(), 2);
+        assert_eq!(sessions_response[0].id, "session1");
+        assert_eq!(sessions_response[1].id, "session2");
+    }
+
+    #[tokio::test]
+    async fn test_get_session_endpoint_success() {
+        let mut mock_file_logger = MockFileLogger::new();
+        mock_file_logger.expect_get_sessions()
+            .return_once(|| {
+                Ok(vec![
+                    SessionLog {
+                        id: "session1".to_string(),
+                        started_at: Utc.timestamp_opt(1678886400, 0).unwrap(),
+                        ended_at: None,
+                        status: "active".to_string(),
+                        mic_usage_detected: false,
+                        suspicious_processes: vec![],
+                        bam_anomaly_score: None,
+                        bam_is_ai_like: None,
+                        created_at: Utc.timestamp_opt(1678886400, 0).unwrap(),
+                        updated_at: Utc.timestamp_opt(1678886400, 0).unwrap(),
+                    },
+                ])
+            });
+
+        let mut mock_config = MockAppConfig::new();
+        mock_config.expect_app().return_const(crate::config::AppSettings {
+            name: "TestApp".to_string(),
+            version: "1.0.0".to_string(),
+            environment: "test".to_string(),
+            log_level: "info".to_string(),
+            teacher_pc_port: 8081,
+        });
+
+        let mock_bam_service = MockBamMonitoringService::new();
+
+        let state = ApiState {
+            config: Arc::new(mock_config),
+            bam_service: Arc::new(RwLock::new(mock_bam_service)),
+            file_logger: Arc::new(mock_file_logger),
+        };
+
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(Request::builder().uri("/sessions/session1").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let session_response: SessionResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(session_response.id, "session1");
+    }
+
+    #[tokio::test]
+    async fn test_get_session_endpoint_not_found() {
+        let mut mock_file_logger = MockFileLogger::new();
+        mock_file_logger.expect_get_sessions()
+            .return_once(|| Ok(vec![])); // Return empty vec for no sessions
+
+        let mut mock_config = MockAppConfig::new();
+        mock_config.expect_app().return_const(crate::config::AppSettings {
+            name: "TestApp".to_string(),
+            version: "1.0.0".to_string(),
+            environment: "test".to_string(),
+            log_level: "info".to_string(),
+            teacher_pc_port: 8081,
+        });
+
+        let mock_bam_service = MockBamMonitoringService::new();
+
+        let state = ApiState {
+            config: Arc::new(mock_config),
+            bam_service: Arc::new(RwLock::new(mock_bam_service)),
+            file_logger: Arc::new(mock_file_logger),
+        };
+
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(Request::builder().uri("/sessions/nonexistent_session").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let error_response: ErrorResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error_response.error, "not_found");
+        assert!(error_response.message.contains("Session nonexistent_session not found"));
+    }
+
+    #[tokio::test]
+    async fn test_end_session_endpoint() {
+        let state = create_test_api_state();
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/sessions/some_session_id")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "ended");
+        assert_eq!(json["message"], "Session ended successfully");
+    }
+
+    #[tokio::test]
+    async fn test_get_session_stats_endpoint() {
+        let state = create_test_api_state();
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(Request::builder().uri("/sessions/some_session_id/stats").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json.is_object());
+        assert!(json.as_object().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_session_alerts_endpoint() {
+        let mut mock_file_logger = MockFileLogger::new();
+        mock_file_logger.expect_get_session_alerts()
+            .with(eq("session1"))
+            .return_once(|_| {
+                Ok(vec![
+                    AlertLog {
+                        id: "alert1".to_string(),
+                        session_id: "session1".to_string(),
+                        alert_type: "bam_anomaly".to_string(),
+                        severity: "high".to_string(),
+                        message: "AI detected".to_string(),
+                        metadata: json!({}),
+                        created_at: Utc.timestamp_opt(1678886400, 0).unwrap(),
+                        acknowledged_at: None,
+                        acknowledged_by: None,
+                    },
+                ])
+            });
+
+        let mut mock_config = MockAppConfig::new();
+        mock_config.expect_app().return_const(crate::config::AppSettings {
+            name: "TestApp".to_string(),
+            version: "1.0.0".to_string(),
+            environment: "test".to_string(),
+            log_level: "info".to_string(),
+            teacher_pc_port: 8081,
+        });
+
+        let mock_bam_service = MockBamMonitoringService::new();
+
+        let state = ApiState {
+            config: Arc::new(mock_config),
+            bam_service: Arc::new(RwLock::new(mock_bam_service)),
+            file_logger: Arc::new(mock_file_logger),
+        };
+
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(Request::builder().uri("/sessions/session1/alerts").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let alerts_response: Vec<AlertResponse> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(alerts_response.len(), 1);
+        assert_eq!(alerts_response[0].session_id, "session1");
+        assert_eq!(alerts_response[0].alert_type, "bam_anomaly");
+    }
+
+    #[tokio::test]
+    async fn test_get_session_bam_results_endpoint() {
+        let mut mock_file_logger = MockFileLogger::new();
+        mock_file_logger.expect_get_session_bam_results()
+            .with(eq("session1"))
+            .return_once(|_| {
+                Ok(vec![
+                    BamResultLog {
+                        id: "bam_res1".to_string(),
+                        session_id: "session1".to_string(),
+                        latencies: vec![0.1, 0.2, 0.3],
+                        mean_latency: 0.2,
+                        anomaly_score: 0.8,
+                        is_ai_like: true,
+                        confidence: 0.9,
+                        created_at: Utc.timestamp_opt(1678886400, 0).unwrap(),
+                    },
+                ])
+            });
+
+        let mut mock_config = MockAppConfig::new();
+        mock_config.expect_app().return_const(crate::config::AppSettings {
+            name: "TestApp".to_string(),
+            version: "1.0.0".to_string(),
+            environment: "test".to_string(),
+            log_level: "info".to_string(),
+            teacher_pc_port: 8081,
+        });
+
+        let mock_bam_service = MockBamMonitoringService::new();
+
+        let state = ApiState {
+            config: Arc::new(mock_config),
+            bam_service: Arc::new(RwLock::new(mock_bam_service)),
+            file_logger: Arc::new(mock_file_logger),
+        };
+
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(Request::builder().uri("/sessions/session1/bam-results").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let bam_results_response: Vec<BamResultResponse> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(bam_results_response.len(), 1);
+        assert_eq!(bam_results_response[0].session_id, "session1");
+        assert_eq!(bam_results_response[0].anomaly_score, 0.8);
+    }
+
+    #[tokio::test]
+    async fn test_list_alerts_endpoint() {
+        let mut mock_file_logger = MockFileLogger::new();
+        mock_file_logger.expect_get_alerts()
+            .return_once(|| {
+                Ok(vec![
+                    AlertLog {
+                        id: "alert1".to_string(),
+                        session_id: "session1".to_string(),
+                        alert_type: "bam_anomaly".to_string(),
+                        severity: "high".to_string(),
+                        message: "AI detected".to_string(),
+                        metadata: json!({}),
+                        created_at: Utc.timestamp_opt(1678886400, 0).unwrap(),
+                        acknowledged_at: None,
+                        acknowledged_by: None,
+                    },
+                ])
+            });
+
+        let mut mock_config = MockAppConfig::new();
+        mock_config.expect_app().return_const(crate::config::AppSettings {
+            name: "TestApp".to_string(),
+            version: "1.0.0".to_string(),
+            environment: "test".to_string(),
+            log_level: "info".to_string(),
+            teacher_pc_port: 8081,
+        });
+
+        let mock_bam_service = MockBamMonitoringService::new();
+
+        let state = ApiState {
+            config: Arc::new(mock_config),
+            bam_service: Arc::new(RwLock::new(mock_bam_service)),
+            file_logger: Arc::new(mock_file_logger),
+        };
+
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(Request::builder().uri("/alerts").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let alerts_response: Vec<AlertResponse> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(alerts_response.len(), 1);
+        assert_eq!(alerts_response[0].id, "alert1");
+    }
+
+    #[tokio::test]
+    async fn test_acknowledge_alert_endpoint() {
+        let state = create_test_api_state();
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/alerts/alert1/acknowledge")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "acknowledged");
+        assert_eq!(json["message"], "Alert acknowledged");
+    }
+
+    #[tokio::test]
+    async fn test_get_active_monitoring_endpoint() {
+        let mut mock_bam_service = MockBamMonitoringService::new();
+        mock_bam_service.expect_get_active_sessions()
+            .return_once(|| vec!["session_active_1".to_string(), "session_active_2".to_string()]);
+
+        let mut mock_config = MockAppConfig::new();
+        mock_config.expect_app().return_const(crate::config::AppSettings {
+            name: "TestApp".to_string(),
+            version: "1.0.0".to_string(),
+            environment: "test".to_string(),
+            log_level: "info".to_string(),
+            teacher_pc_port: 8081,
+        });
+
+        let mock_file_logger = MockFileLogger::new();
+
+        let state = ApiState {
+            config: Arc::new(mock_config),
+            bam_service: Arc::new(RwLock::new(mock_bam_service)),
+            file_logger: Arc::new(mock_file_logger),
+        };
+
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(Request::builder().uri("/monitoring/active").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["active_sessions"], json!(["session_active_1", "session_active_2"]));
+    }
+
+    #[tokio::test]
+    async fn test_start_monitoring_endpoint() {
+        let mut mock_bam_service = MockBamMonitoringService::new();
+        mock_bam_service.expect_start_session_monitoring()
+            .with(eq("new_session_id".to_string()))
+            .return_once(|_| Ok(()));
+
+        let mut mock_config = MockAppConfig::new();
+        mock_config.expect_app().return_const(crate::config::AppSettings {
+            name: "TestApp".to_string(),
+            version: "1.0.0".to_string(),
+            environment: "test".to_string(),
+            log_level: "info".to_string(),
+            teacher_pc_port: 8081,
+        });
+
+        let mock_file_logger = MockFileLogger::new();
+
+        let state = ApiState {
+            config: Arc::new(mock_config),
+            bam_service: Arc::new(RwLock::new(mock_bam_service)),
+            file_logger: Arc::new(mock_file_logger),
+        };
+
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/monitoring/new_session_id/start")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "started");
+        assert_eq!(json["message"], "Monitoring started");
+    }
+
+    #[tokio::test]
+    async fn test_stop_monitoring_endpoint() {
+        let mut mock_bam_service = MockBamMonitoringService::new();
+        mock_bam_service.expect_stop_session_monitoring()
+            .with(eq("existing_session_id"));
+
+        let mut mock_config = MockAppConfig::new();
+        mock_config.expect_app().return_const(crate::config::AppSettings {
+            name: "TestApp".to_string(),
+            version: "1.0.0".to_string(),
+            environment: "test".to_string(),
+            log_level: "info".to_string(),
+            teacher_pc_port: 8081,
+        });
+
+        let mock_file_logger = MockFileLogger::new();
+
+        let state = ApiState {
+            config: Arc::new(mock_config),
+            bam_service: Arc::new(RwLock::new(mock_bam_service)),
+            file_logger: Arc::new(mock_file_logger),
+        };
+
+        let app = ApiServer { state }.create_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/monitoring/existing_session_id/stop")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "stopped");
+        assert_eq!(json["message"], "Monitoring stopped");
+    }
+
+}
