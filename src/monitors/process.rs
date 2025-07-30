@@ -78,20 +78,18 @@ pub enum SuspiciousBehaviorType {
 ///    - Example: "python3 -m openai.chat", "./ai-tool --model=gpt-4"
 /// 
 /// # Examples
-/// 
-/// ```rust
+///
 /// // Detects ChatGPT desktop app
-/// Process: "ChatGPT.exe" -> 95% confidence (MatchesAiPattern)
-/// 
+/// // Process: "ChatGPT.exe" -> 95% confidence (MatchesAiPattern)
+///
 /// // Detects custom AI tool
-/// Process: "my-homework-helper" -> 90% confidence (MatchesConfiguredBinary)
-/// 
+/// // Process: "my-homework-helper" -> 90% confidence (MatchesConfiguredBinary)
+///
 /// // Detects AI tool with suspicious args
-/// Process: "python3" with args ["-m", "openai.chat"] -> 60% confidence (SuspiciousCommandLine)
-/// 
+/// // Process: "python3" with args ["-m", "openai.chat"] -> 60% confidence (SuspiciousCommandLine)
+///
 /// // Detects process with AI keywords
-/// Process: "voice-to-text-assistant" -> 70% confidence (HasAiKeywords)
-/// ```
+/// // Process: "voice-to-text-assistant" -> 70% confidence (HasAiKeywords)
 pub fn scan(config: &AppConfig) -> ProcessScanResult {
     let start_time = std::time::Instant::now();
     

@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use tracing::{error, info};
 use cluelyguard::config::AppConfig;
-use cluelyguard::logger::RamDumpLog;
+// use cluelyguard::logger::RamDumpLog; // Removed as no longer directly used
 use std::process::Command;
 
 #[derive(Parser)]
@@ -116,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Creating RAM dump for session: {:?} for student: {}", session_id, student_code);
             
             // Load config
-            let config = Arc::new(AppConfig::load()?);
+            let config = Arc::new(AppConfig::load(None)?);
             
             // Create session ID if not provided
             let session_id = session_id.clone().unwrap_or_else(|| {
@@ -125,7 +125,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
             
             // Create RAM dump
-            match RamDumpLog::create_ram_dump(&session_id, student_code) {
+            // Initialize file logger
+            let file_logger = Arc::new(cluelyguard::logger::FileLogger::new(config.clone())?);
+
+            match cluelyguard::logger::FileLogger::create_ram_dump(&session_id, student_code) {
                 Ok(dump) => {
                     info!("RAM dump created successfully:");
                     println!("📊 Memory Usage: {:.2} MB", dump.memory_usage_mb);
@@ -136,13 +139,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("📅 Timestamp: {}", dump.timestamp);
                     
                     // Save to file
-                    use cluelyguard::logger::FileLogger;
-                    if let Ok(logger) = FileLogger::new(config.clone()) {
-                        if let Err(e) = logger.log_ram_dump(&dump) {
-                            error!("Failed to save RAM dump: {}", e);
-                        } else {
-                            println!("💾 RAM dump saved to logs/ram_dumps/dump_{}.json", dump.id);
-                        }
+                    if let Err(e) = file_logger.log_ram_dump(&dump) {
+                        error!("Failed to save RAM dump: {}", e);
+                    } else {
+                        println!("💾 RAM dump saved to logs/ram_dumps/dump_{}.json", dump.id);
                     }
                 }
                 Err(e) => {

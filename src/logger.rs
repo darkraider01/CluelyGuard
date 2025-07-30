@@ -56,10 +56,10 @@ pub struct RamDumpLog {
 }
 
 impl RamDumpLog {
-    pub fn new() -> Self {
+    pub fn new(session_id: String) -> Self {
         Self {
-            id: String::new(),
-            session_id: String::new(),
+            id: uuid::Uuid::new_v4().to_string(),
+            session_id,
             timestamp: Utc::now(),
             memory_usage_mb: 0.0,
             suspicious_processes: Vec::new(),
@@ -68,35 +68,6 @@ impl RamDumpLog {
             created_at: Utc::now(),
         }
     }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SuspiciousProcessInfo {
-    pub pid: i32,
-    pub name: String,
-    pub memory_mb: f64,
-    pub cpu_percent: f64,
-    pub command_line: Vec<String>,
-    pub reason: String,
-    pub confidence: f64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct NetworkConnection {
-    pub local_address: String,
-    pub remote_address: String,
-    pub protocol: String,
-    pub state: String,
-    pub pid: i32,
-    pub process_name: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FileHandle {
-    pub path: String,
-    pub pid: i32,
-    pub process_name: String,
-    pub access_mode: String,
 }
 
 #[derive(Debug)]
@@ -139,6 +110,17 @@ impl FileLogger {
             }
         }
         Ok(results)
+    }
+
+    pub fn append_to_log_file(&self, log_entry: &str) -> Result<(), std::io::Error> {
+        use std::io::Write;
+        let log_file_path = format!("{}/cluelyguard.log", self.logs_dir);
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_file_path)?;
+        writeln!(file, "{}", log_entry)?;
+        Ok(())
     }
 
     pub fn log_session(&self, session: &SessionLog) -> Result<(), std::io::Error> {
@@ -194,5 +176,351 @@ impl FileLogger {
     pub fn get_session_ram_dumps(&self, session_id: &str) -> Result<Vec<RamDumpLog>, std::io::Error> {
         let dumps = self.get_ram_dumps()?;
         Ok(dumps.into_iter().filter(|d| d.session_id == session_id).collect())
+    }
+
+    pub fn create_ram_dump(session_id: &str, _student_code: &str) -> Result<RamDumpLog, Box<dyn std::error::Error>> {
+        use procfs::process::{all_processes};
+        use sysinfo::{System, SystemExt, ProcessExt, Pid};
+
+        let mut sys = System::new_all();
+        sys.refresh_all();
+
+        #[allow(unused_assignments)] // memory_usage_mb is assigned later
+        let mut memory_usage_mb = 0.0;
+        #[allow(unused_variables)] // suspicious_processes, network_connections, file_handles are used but not always in every branch
+        let mut suspicious_processes: Vec<SuspiciousProcessInfo> = Vec::new();
+        #[allow(unused_variables)]
+        let mut network_connections: Vec<NetworkConnection> = Vec::new();
+        #[allow(unused_variables)]
+        let mut file_handles: Vec<FileHandle> = Vec::new();
+
+        // Get total memory usage
+        memory_usage_mb = sys.used_memory() as f64 / (1024.0 * 1024.0);
+
+        // Process information
+        for proc_result in all_processes()? {
+            if let Ok(proc) = proc_result {
+                let pid = proc.pid();
+                let name = proc.stat()?.comm;
+                let cmdline = proc.cmdline()?;
+                
+                let process_sysinfo = sys.process(Pid::from(pid as usize)); // Corrected Pid creation
+                let memory_mb_sysinfo = process_sysinfo.map_or(0.0, |p| p.memory() as f64 / (1024.0 * 1024.0));
+                let cpu_percent_sysinfo = process_sysinfo.map_or(0.0, |p| p.cpu_usage() as f64);
+
+
+                // Simulate suspicious process detection
+                if name.contains("llm_tool") || cmdline.join(" ").contains("ai_script.py") {
+                    suspicious_processes.push(SuspiciousProcessInfo {
+                        pid,
+                        name: name.clone(),
+                        memory_mb: memory_mb_sysinfo,
+                        cpu_percent: cpu_percent_sysinfo,
+                        command_line: cmdline,
+                        reason: "Detected suspicious AI tool name or command line".to_string(),
+                        confidence: 0.9,
+                    });
+                }
+
+                // Network connections (simplified, real impl would need more detail)
+                if let Ok(net_connections) = proc.tcp() {
+                    for conn in net_connections {
+                        network_connections.push(NetworkConnection {
+                            local_address: conn.local_address.to_string(),
+                            remote_address: conn.remote_address.to_string(),
+                            protocol: "TCP".to_string(),
+                            state: format!("{:?}", conn.state),
+                            pid,
+                            process_name: name.clone(),
+                        });
+                    }
+                }
+                if let Ok(net_connections) = proc.tcp6() {
+                    for conn in net_connections {
+                        network_connections.push(NetworkConnection {
+                            local_address: conn.local_address.to_string(),
+                            remote_address: conn.remote_address.to_string(),
+                            protocol: "TCP6".to_string(),
+                            state: format!("{:?}", conn.state),
+                            pid,
+                            process_name: name.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // File handles (simplified, real impl would need lsof or similar)
+        // This is a placeholder as procfs doesn't directly give open file handles in an easy way
+        // You'd typically use lsof or similar tools for this.
+        file_handles.push(FileHandle {
+            path: "/tmp/some_temp_file.txt".to_string(),
+            pid: 1234, // Dummy PID
+            process_name: "dummy_process".to_string(),
+            access_mode: "rw".to_string(),
+        });
+
+
+        Ok(RamDumpLog {
+            id: uuid::Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            timestamp: Utc::now(),
+            memory_usage_mb,
+            suspicious_processes,
+            network_connections,
+            file_handles,
+            created_at: Utc::now(),
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SuspiciousProcessInfo {
+    pub pid: i32,
+    pub name: String,
+    pub memory_mb: f64,
+    pub cpu_percent: f64,
+    pub command_line: Vec<String>,
+    pub reason: String,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NetworkConnection {
+    pub local_address: String,
+    pub remote_address: String,
+    pub protocol: String,
+    pub state: String,
+    pub pid: i32,
+    pub process_name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FileHandle {
+    pub path: String,
+    pub pid: i32,
+    pub process_name: String,
+    pub access_mode: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use std::fs;
+    // use std::io::Read; // Removed unused import
+    // use chrono::Duration; // Removed unused import
+
+    // Helper function to create a dummy config for tests
+    fn create_test_config() -> AppConfig {
+        AppConfig::default()
+    }
+
+    #[test]
+    fn test_file_logger_new() {
+        let temp_dir = tempdir().unwrap();
+        let logs_dir_path = temp_dir.path().join("logs");
+        
+        // Mock AppConfig to use the temporary directory
+        let mut config = create_test_config();
+        config.storage.logs_dir = logs_dir_path.to_str().unwrap().to_string();
+
+        let logger = FileLogger::new(Arc::new(config)).unwrap();
+        
+        assert!(fs::metadata(&logger.logs_dir).unwrap().is_dir());
+        assert!(fs::metadata(format!("{}/sessions", logger.logs_dir)).unwrap().is_dir());
+        assert!(fs::metadata(format!("{}/alerts", logger.logs_dir)).unwrap().is_dir());
+        assert!(fs::metadata(format!("{}/bam_results", logger.logs_dir)).unwrap().is_dir());
+        assert!(fs::metadata(format!("{}/ram_dumps", logger.logs_dir)).unwrap().is_dir());
+    }
+
+    #[test]
+    fn test_write_and_read_json_file() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.json");
+        
+        let logger = FileLogger { logs_dir: temp_dir.path().to_str().unwrap().to_string() };
+        
+        #[derive(Debug, Serialize, Deserialize, PartialEq)]
+        struct TestData {
+            name: String,
+            value: u32,
+        }
+        
+        let data = TestData { name: "test".to_string(), value: 123 };
+        logger.write_json_file(file_path.to_str().unwrap(), &data).unwrap();
+        
+        let read_data: TestData = serde_json::from_str(&fs::read_to_string(&file_path).unwrap()).unwrap();
+        assert_eq!(data, read_data);
+    }
+
+    #[test]
+    fn test_log_and_get_session() {
+        let temp_dir = tempdir().unwrap();
+        let logs_dir_path = temp_dir.path().join("logs");
+        fs::create_dir_all(&logs_dir_path).unwrap();
+        fs::create_dir_all(format!("{}/sessions", logs_dir_path.to_str().unwrap())).unwrap();
+
+        let logger = FileLogger { logs_dir: logs_dir_path.to_str().unwrap().to_string() };
+        
+        let session = SessionLog {
+            id: "test_session_1".to_string(),
+            started_at: Utc::now(),
+            ended_at: None,
+            status: "active".to_string(),
+            mic_usage_detected: false,
+            suspicious_processes: vec![],
+            bam_anomaly_score: None,
+            bam_is_ai_like: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        
+        logger.log_session(&session).unwrap();
+        
+        let sessions = logger.get_sessions().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "test_session_1");
+    }
+
+    #[test]
+    fn test_log_and_get_alert() {
+        let temp_dir = tempdir().unwrap();
+        let logs_dir_path = temp_dir.path().join("logs");
+        fs::create_dir_all(&logs_dir_path).unwrap();
+        fs::create_dir_all(format!("{}/alerts", logs_dir_path.to_str().unwrap())).unwrap();
+
+        let logger = FileLogger { logs_dir: logs_dir_path.to_str().unwrap().to_string() };
+        
+        let alert = AlertLog {
+            id: "test_alert_1".to_string(),
+            session_id: "test_session_1".to_string(),
+            alert_type: "test_type".to_string(),
+            severity: "low".to_string(),
+            message: "Test alert message".to_string(),
+            metadata: serde_json::json!({}),
+            created_at: Utc::now(),
+            acknowledged_at: None,
+            acknowledged_by: None,
+        };
+        
+        logger.log_alert(&alert).unwrap();
+        
+        let alerts = logger.get_alerts().unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].id, "test_alert_1");
+    }
+
+    #[test]
+    fn test_log_and_get_bam_result() {
+        let temp_dir = tempdir().unwrap();
+        let logs_dir_path = temp_dir.path().join("logs");
+        fs::create_dir_all(&logs_dir_path).unwrap();
+        fs::create_dir_all(format!("{}/bam_results", logs_dir_path.to_str().unwrap())).unwrap();
+
+        let logger = FileLogger { logs_dir: logs_dir_path.to_str().unwrap().to_string() };
+        
+        let bam_result = BamResultLog {
+            id: "test_bam_1".to_string(),
+            session_id: "test_session_1".to_string(),
+            latencies: vec![0.1, 0.2, 0.3],
+            mean_latency: 0.2,
+            anomaly_score: 0.5,
+            is_ai_like: false,
+            confidence: 0.6,
+            created_at: Utc::now(),
+        };
+        
+        logger.log_bam_result(&bam_result).unwrap();
+        
+        let results = logger.get_bam_results().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "test_bam_1");
+    }
+
+    #[test]
+    fn test_log_and_get_ram_dump() {
+        let temp_dir = tempdir().unwrap();
+        let logs_dir_path = temp_dir.path().join("logs");
+        fs::create_dir_all(&logs_dir_path).unwrap();
+        fs::create_dir_all(format!("{}/ram_dumps", logs_dir_path.to_str().unwrap())).unwrap();
+
+        let logger = FileLogger { logs_dir: logs_dir_path.to_str().unwrap().to_string() };
+        
+        let ram_dump = RamDumpLog {
+            id: "test_dump_1".to_string(),
+            session_id: "test_session_1".to_string(),
+            timestamp: Utc::now(),
+            memory_usage_mb: 100.0,
+            suspicious_processes: vec![],
+            network_connections: vec![],
+            file_handles: vec![],
+            created_at: Utc::now(),
+        };
+        
+        logger.log_ram_dump(&ram_dump).unwrap();
+        
+        let dumps = logger.get_ram_dumps().unwrap();
+        assert_eq!(dumps.len(), 1);
+        assert_eq!(dumps[0].id, "test_dump_1");
+    }
+
+    #[test]
+    fn test_get_session_alerts() {
+        let temp_dir = tempdir().unwrap();
+        let logs_dir_path = temp_dir.path().join("logs");
+        fs::create_dir_all(&logs_dir_path).unwrap();
+        fs::create_dir_all(format!("{}/alerts", logs_dir_path.to_str().unwrap())).unwrap();
+
+        let logger = FileLogger { logs_dir: logs_dir_path.to_str().unwrap().to_string() };
+        
+        let alert1 = AlertLog { id: "alert1".to_string(), session_id: "session1".to_string(), alert_type: "type1".to_string(), severity: "high".to_string(), message: "msg1".to_string(), metadata: serde_json::json!({}), created_at: Utc::now(), acknowledged_at: None, acknowledged_by: None };
+        let alert2 = AlertLog { id: "alert2".to_string(), session_id: "session2".to_string(), alert_type: "type2".to_string(), severity: "low".to_string(), message: "msg2".to_string(), metadata: serde_json::json!({}), created_at: Utc::now(), acknowledged_at: None, acknowledged_by: None };
+        let alert3 = AlertLog { id: "alert3".to_string(), session_id: "session1".to_string(), alert_type: "type3".to_string(), severity: "medium".to_string(), message: "msg3".to_string(), metadata: serde_json::json!({}), created_at: Utc::now(), acknowledged_at: None, acknowledged_by: None };
+
+        logger.log_alert(&alert1).unwrap();
+        logger.log_alert(&alert2).unwrap();
+        logger.log_alert(&alert3).unwrap();
+
+        let session1_alerts = logger.get_session_alerts("session1").unwrap();
+        assert_eq!(session1_alerts.len(), 2);
+        assert!(session1_alerts.iter().any(|a| a.id == "alert1"));
+        assert!(session1_alerts.iter().any(|a| a.id == "alert3"));
+    }
+
+    #[test]
+    fn test_append_to_log_file() {
+        let temp_dir = tempdir().unwrap();
+        let logs_dir_path = temp_dir.path().join("logs");
+        fs::create_dir_all(&logs_dir_path).unwrap();
+
+        let logger = FileLogger { logs_dir: logs_dir_path.to_str().unwrap().to_string() };
+        let log_entry1 = "First log entry.";
+        let log_entry2 = "Second log entry.";
+
+        logger.append_to_log_file(log_entry1).unwrap();
+        logger.append_to_log_file(log_entry2).unwrap();
+
+        let log_file_content = fs::read_to_string(format!("{}/cluelyguard.log", logs_dir_path.to_str().unwrap())).unwrap();
+        assert!(log_file_content.contains(log_entry1));
+        assert!(log_file_content.contains(log_entry2));
+    }
+
+    // Mocking for create_ram_dump is complex due to procfs and sysinfo.
+    // A basic test to ensure it runs without immediate errors.
+    #[test]
+    fn test_create_ram_dump_basic() {
+        // This test relies on procfs and sysinfo, which interact with the actual system.
+        // It's more of an integration test for the function's execution flow.
+        // Mocking these dependencies would require a more advanced mocking framework.
+        let session_id = "mock_session";
+        let student_code = "mock_student";
+        
+        let result = FileLogger::create_ram_dump(session_id, student_code);
+        assert!(result.is_ok(), "create_ram_dump failed: {:?}", result.err());
+        let dump = result.unwrap();
+        assert_eq!(dump.session_id, session_id);
+        assert!(!dump.id.is_empty());
+        assert!(dump.memory_usage_mb > 0.0); // Should be non-zero on a running system
     }
 }
