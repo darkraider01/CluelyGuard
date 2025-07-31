@@ -2,7 +2,14 @@ use clap::Parser;
 use cluelyguard::config::AppConfig;
 use cluelyguard::logger::{FileLogger, RamDumpLog};
 use cluelyguard::monitors::bam_realtime::BamMonitoringService;
+use cluelyguard::monitors::browser::BrowserMonitor;
+use cluelyguard::monitors::fs_monitor;
 use cluelyguard::monitors::network::NetworkMonitor;
+use cluelyguard::monitors::output_analysis::analyze_output;
+use cluelyguard::monitors::process;
+use cluelyguard::monitors::screensharing;
+use cluelyguard::monitors::syscall_monitor;
+use cluelyguard::monitors::user_activity;
 use cluelyguard::network::NetworkClient;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -77,38 +84,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+        let network_monitor = NetworkMonitor::new();
+        network_monitor.start_monitoring(); // Start the background thread
+        let browser_monitor = BrowserMonitor::new();
+        browser_monitor.start_monitoring(); // Start browser monitoring
+        // let process_monitor = process::ProcessMonitor::new(); // Initialize process monitor
+
         loop {
             interval.tick().await;
 
-            // Check for suspicious DNS queries
-            if let Some(suspicion) = NetworkMonitor::check_dns_queries() {
-                let log_entry = format!("{{ \"type\": \"dns_suspicion\", \"student_code\": \"{}\", \"timestamp\": \"{}\", \"data\": \"{}\" }}",
-                                        student_code_clone.as_deref().unwrap_or("local_test"), chrono::Utc::now().to_rfc3339(), suspicion);
-                if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
-                    error!("Failed to log DNS suspicion: {}", e);
-                }
-                #[cfg(not(feature = "local_test"))]
-                if let Err(e) = network_client_clone.send_data(log_entry).await {
-                    error!("Failed to send DNS suspicion to teacher PC: {}", e);
-                }
-            } // End of DNS queries if
-            
-            // Simulate output analysis
-            let simulated_output = "This is a simulated output. I am a large language model.";
-            if let Some(suspicion) = cluelyguard::monitors::output_analysis::analyze_output(simulated_output) {
-                let log_entry = format!("{{ \"type\": \"output_suspicion\", \"student_code\": \"{}\", \"timestamp\": \"{}\", \"data\": \"{}\" }}",
-                                        student_code_clone.as_deref().unwrap_or("local_test"), chrono::Utc::now().to_rfc3339(), suspicion);
-                if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
-                    error!("Failed to log output suspicion: {}", e);
-                }
-                #[cfg(not(feature = "local_test"))]
-                if let Err(e) = network_client_clone.send_data(log_entry).await {
-                    error!("Failed to send output suspicion to teacher PC: {}", e);
-                }
-            } // End of output analysis if
-
             // Check for suspicious file system activity
-            if let Some(suspicion) = cluelyguard::monitors::fs_monitor::check_file_system_activity() {
+            if let Some(suspicion) = fs_monitor::check_file_system_activity() {
                 let log_entry = format!("{{ \"type\": \"fs_suspicion\", \"student_code\": \"{}\", \"timestamp\": \"{}\", \"data\": \"{}\" }}",
                                         student_code_clone.as_deref().unwrap_or("local_test"), chrono::Utc::now().to_rfc3339(), suspicion);
                 if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
@@ -120,8 +106,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             } // End of file system activity if
 
+            // Simulate output analysis
+            let simulated_output = "This is a simulated output. I am a large language model.";
+            if let Some(suspicion) = analyze_output(simulated_output) {
+                let log_entry = format!("{{ \"type\": \"output_suspicion\", \"student_code\": \"{}\", \"timestamp\": \"{}\", \"data\": \"{}\" }}",
+                                        student_code_clone.as_deref().unwrap_or("local_test"), chrono::Utc::now().to_rfc3339(), suspicion);
+                if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
+                    error!("Failed to log output suspicion: {}", e);
+                }
+                #[cfg(not(feature = "local_test"))]
+                if let Err(e) = network_client_clone.send_data(log_entry).await {
+                    error!("Failed to send output suspicion to teacher PC: {}", e);
+                }
+            } // End of output analysis if
+
             // Check for suspicious syscall activity
-            if let Some(suspicion) = cluelyguard::monitors::syscall_monitor::check_syscall_activity() {
+            if let Some(suspicion) = syscall_monitor::check_syscall_activity() {
                 let log_entry = format!("{{ \"type\": \"syscall_suspicion\", \"student_code\": \"{}\", \"timestamp\": \"{}\", \"data\": \"{}\" }}",
                                         student_code_clone.as_deref().unwrap_or("local_test"), chrono::Utc::now().to_rfc3339(), suspicion);
                 if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
@@ -134,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } // End of syscall activity if
 
             // Check for suspicious user activity
-            if let Some(suspicion) = cluelyguard::monitors::user_activity::check_user_activity() {
+            if let Some(suspicion) = user_activity::check_user_activity() {
                 let log_entry = format!("{{ \"type\": \"user_activity_suspicion\", \"student_code\": \"{}\", \"timestamp\": \"{}\", \"data\": \"{}\" }}",
                                         student_code_clone.as_deref().unwrap_or("local_test"), chrono::Utc::now().to_rfc3339(), suspicion);
                 if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
@@ -147,7 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } // End of user activity if
 
             // Check for screensharing activity
-            if let Some(suspicion) = cluelyguard::monitors::screensharing::check_screensharing() {
+            if let Some(suspicion) = screensharing::check_screensharing() {
                 let log_entry = format!("{{ \"type\": \"screensharing_suspicion\", \"student_code\": \"{}\", \"timestamp\": \"{}\", \"data\": \"{}\" }}",
                                         student_code_clone.as_deref().unwrap_or("local_test"), chrono::Utc::now().to_rfc3339(), suspicion);
                 if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
@@ -159,43 +159,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             } // End of screensharing activity if
 
-            match NetworkMonitor::get_network_usage() {
-                Ok(usage) => {
-                    let log_entry = format!("{{ \"type\": \"network_usage\", \"student_code\": \"{}\", \"timestamp\": \"{}\", \"data\": \"{}\" }}",
-                                            student_code_clone.as_deref().unwrap_or("local_test"), chrono::Utc::now().to_rfc3339(), usage.replace("\n", " "));
-                    if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
-                        error!("Failed to log network usage: {}", e);
-                    }
-                    #[cfg(not(feature = "local_test"))]
-                    if let Err(e) = network_client_clone.send_data(log_entry).await {
-                        error!("Failed to send network usage to teacher PC: {}", e);
-                    }
+            // Example of how to retrieve detected LLM domains from the network monitor
+            let detected_llm_domains = network_monitor.get_detected_llm_domains();
+            if !detected_llm_domains.is_empty() {
+                let log_entry = format!("{{ \"type\": \"network_suspicion\", \"student_code\": \"{}\", \"timestamp\": \"{}\", \"data\": \"{:?}\" }}",
+                                        student_code_clone.as_deref().unwrap_or("local_test"), chrono::Utc::now().to_rfc3339(), detected_llm_domains);
+                if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
+                    error!("Failed to log network suspicion: {}", e);
                 }
-                Err(e) => {
-                    error!("Failed to get network usage: {}", e);
+                #[cfg(not(feature = "local_test"))]
+                if let Err(e) = network_client_clone.send_data(log_entry).await {
+                    error!("Failed to send network suspicion to teacher PC: {}", e);
                 }
-            } // End of NetworkMonitor match
+            }
+
+            // Periodically scan processes for suspicious AI tools
+            let config_clone = config.clone(); // Clone config for use in the async block
+            let process_scan_result = process::scan(&config_clone); // Call the standalone function
+            if !process_scan_result.suspicious_processes.is_empty() {
+                let log_entry = format!("{{ \"type\": \"process_suspicion\", \"student_code\": \"{}\", \"timestamp\": \"{}\", \"data\": \"{:?}\" }}",
+                                        student_code_clone.as_deref().unwrap_or("local_test"), chrono::Utc::now().to_rfc3339(), process_scan_result.suspicious_processes);
+                if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
+                    error!("Failed to log process suspicion: {}", e);
+                }
+                #[cfg(not(feature = "local_test"))]
+                if let Err(e) = network_client_clone.send_data(log_entry).await {
+                    error!("Failed to send process suspicion to teacher PC: {}", e);
+                }
+            }
+
+            // Periodically get network usage (example, integrate with checks above)
+            // This is now part of the NetworkMonitor's internal logic if implemented to capture all traffic.
+            // If you still need periodic usage stats, you'd call a method on `network_monitor` here.
+            // For now, removing the direct `get_network_usage` call as it's replaced by packet capture.
+            // match network_monitor.get_network_usage() { // Assuming you add this method back to NetworkMonitor if needed
+            //     Ok(usage) => {
+            //         let log_entry = format!("{{ \"type\": \"network_usage\", \"student_code\": \"{}\", \"timestamp\": \"{}\", \"data\": \"{}\" }}",
+            //                                 student_code_clone.as_deref().unwrap_or("local_test"), chrono::Utc::now().to_rfc3339(), usage.replace("\n", " "));
+            //         if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
+            //             error!("Failed to log network usage: {}", e);
+            //         }
+            //         #[cfg(not(feature = "local_test"))]
+            //         if let Err(e) = network_client_clone.send_data(log_entry).await {
+            //             error!("Failed to send network usage to teacher PC: {}", e);
+            //         }
+            //     }
+            //     Err(e) => {
+            //         error!("Failed to get network usage: {}", e);
+            //     }
+            // }
         } // End of loop
     }); // End of tokio::spawn block
-
-    // Keep the daemon running
-    info!("CluelyGuard daemon is running. Press Ctrl+C to stop.");
-    
-    tokio::signal::ctrl_c().await?;
-    info!("Shutting down CluelyGuard daemon...");
-    
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    // Daemon tests are currently skipped due to complexity in mocking global statics and external dependencies.
-    // Comprehensive testing of the daemon's behavior would require significant refactoring for dependency injection
-    // or a more advanced testing harness that can simulate system interactions.
-    // These tests would ideally cover:
-    // - Daemon startup with valid/invalid configurations.
-    // - Background monitoring loop and its interaction with various monitors.
-    // - Graceful shutdown.
-    // - Verification of logging and network communication (with mocked FileLogger and NetworkClient).
-    // For now, relying on higher-level integration tests for daemon functionality.
 }

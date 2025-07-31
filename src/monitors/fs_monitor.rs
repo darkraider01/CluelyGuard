@@ -1,4 +1,5 @@
 use tracing::{info, warn};
+use rand::Rng; // Import Rng trait
 
 pub fn check_file_system_activity() -> Option<String> {
     // This is a placeholder for file system monitoring.
@@ -10,7 +11,8 @@ pub fn check_file_system_activity() -> Option<String> {
     info!("Simulating file system activity check...");
 
     // Simulate detection based on a random chance
-    if rand::random::<f32>() < 0.05 { // 5% chance of detecting suspicious FS activity
+    let mut rng = rand::thread_rng();
+    if rng.gen::<f32>() < 0.05 { // 5% chance of detecting suspicious FS activity
         warn!("🚨 Suspicious file system activity detected: Unusual file access.");
         return Some("Unusual file system activity detected.".to_string());
     }

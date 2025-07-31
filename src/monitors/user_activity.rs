@@ -1,4 +1,5 @@
 use tracing::{info, warn};
+use rand::Rng; // Import Rng trait
 
 pub fn check_user_activity() -> Option<String> {
     // This is a placeholder for user activity monitoring.
@@ -10,7 +11,8 @@ pub fn check_user_activity() -> Option<String> {
     info!("Simulating user activity check...");
 
     // Simulate detection based on a random chance
-    if rand::random::<f32>() < 0.02 { // 2% chance of detecting suspicious user activity
+    let mut rng = rand::thread_rng();
+    if rng.gen::<f32>() < 0.02 { // 2% chance of detecting suspicious user activity
         warn!("🚨 Suspicious user activity detected: Unusual command.");
         return Some("Unusual user activity detected.".to_string());
     }

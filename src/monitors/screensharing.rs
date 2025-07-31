@@ -1,4 +1,5 @@
 use tracing::{info, warn};
+use rand::Rng; // Import Rng trait
 
 pub fn check_screensharing() -> Option<String> {
     // This is a placeholder for screensharing detection.
@@ -9,8 +10,9 @@ pub fn check_screensharing() -> Option<String> {
     info!("Simulating screensharing detection...");
 
     // Simulate detection based on a random chance
-    if rand::random::<f32>() < 0.03 { // 3% chance of detecting screensharing
-        warn!("🚨 Suspicious screensharing activity detected.");
+    let mut rng = rand::thread_rng();
+    if rng.gen::<f32>() < 0.03 { // 3% chance of detecting screensharing
+        warn!("🚨 Suspicious screensharing activity detected: Screensharing application detected or screen capture in progress.");
         return Some("Screensharing application detected or screen capture in progress.".to_string());
     }
 

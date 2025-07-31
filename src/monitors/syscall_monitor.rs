@@ -1,4 +1,5 @@
 use tracing::{info, warn};
+use rand::Rng; // Import Rng trait
 
 pub fn check_syscall_activity() -> Option<String> {
     // This is a placeholder for system call monitoring.
@@ -9,7 +10,8 @@ pub fn check_syscall_activity() -> Option<String> {
     info!("Simulating syscall activity check...");
 
     // Simulate detection based on a random chance
-    if rand::random::<f32>() < 0.01 { // 1% chance of detecting suspicious syscall activity
+    let mut rng = rand::thread_rng();
+    if rng.gen::<f32>() < 0.01 { // 1% chance of detecting suspicious syscall activity
         warn!("🚨 Suspicious syscall activity detected: Unusual process behavior.");
         return Some("Unusual syscall activity detected.".to_string());
     }
