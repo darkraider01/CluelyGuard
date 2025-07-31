@@ -12,6 +12,7 @@ use cluelyguard::monitors::syscall_monitor::SyscallMonitor;
 use cluelyguard::monitors::user_activity::UserActivityMonitor;
 use cluelyguard::monitors::coordinator::MonitoringCoordinator; // New import
 use cluelyguard::events::{MonitorEvent, GenericMonitorEvent}; // New import
+use cluelyguard::correlation::{CorrelationEngine, CorrelatedEvent}; // New import
 use cluelyguard::network::NetworkClient;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc}; // Added mpsc
@@ -84,10 +85,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let student_code_clone = cli.student_code.clone();
     let config_clone_for_spawn = config.clone(); // Clone config for the tokio::spawn block
 
+    let network_client_for_coordinator: Option<Arc<NetworkClient>>;
     #[cfg(not(feature = "local_test"))]
-    let network_client_option = Some(network_client.clone());
+    {
+        network_client_for_coordinator = Some(network_client.clone());
+    }
     #[cfg(feature = "local_test")]
-    let network_client_option = None;
+    {
+        network_client_for_coordinator = None;
+    }
+    let network_client_clone_for_receiver = network_client_for_coordinator.clone(); // Clone for receiver loop
 
     // Create an MPSC channel for events
     let (tx, mut rx) = mpsc::channel::<MonitorEvent>(100); // Buffer size of 100
@@ -96,7 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut coordinator = MonitoringCoordinator::new(
         config.clone(), // Clone config for the coordinator
         file_logger.clone(),
-        network_client_option.clone(), // Pass the network_client_option
+        network_client_for_coordinator, // Pass the network_client_for_coordinator
         student_code.clone(),
         tx, // Pass the sender to the coordinator
     );
@@ -108,45 +115,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Event processing loop (receiver side)
     tokio::spawn(async move {
+        let correlation_engine = CorrelationEngine::new(); // Instantiate CorrelationEngine
+
         while let Some(event) = rx.recv().await {
-            let event_type_str = match event {
-                MonitorEvent::FileSystem(_) => "fs_suspicion",
-                MonitorEvent::Browser(_) => "browser_suspicion",
-                MonitorEvent::OutputAnalysis(_) => "output_suspicion",
-                MonitorEvent::Syscall(_) => "syscall_suspicion",
-                MonitorEvent::UserActivity(_) => "user_activity_suspicion",
-                MonitorEvent::ScreenSharing(_) => "screensharing_suspicion",
-                MonitorEvent::NetworkDomain(_) => "network_suspicion",
-                MonitorEvent::ProcessSuspicion(_) => "process_suspicion",
-            };
+            // Process the event with the correlation engine
+            if let Some(correlated_event) = correlation_engine.process_event(event, student_code_clone.as_deref().unwrap_or("local_test")).await {
+                let log_entry = format!(
+                    r#"{{"type": "{}", "student_code": "{}", "timestamp": "{}", "confidence": {}, "description": "{}", "correlated_events": {}}}"#,
+                    correlated_event.event_type,
+                    correlated_event.student_code,
+                    chrono::Utc::now().to_rfc3339(), // Use current time for logging
+                    correlated_event.confidence,
+                    correlated_event.description,
+                    serde_json::to_string(&correlated_event.correlated_events).unwrap_or_default()
+                );
 
-            let log_entry_data = match event {
-                MonitorEvent::FileSystem(e) => to_string(&e).unwrap_or_default(),
-                MonitorEvent::Browser(e) => to_string(&e).unwrap_or_default(),
-                MonitorEvent::OutputAnalysis(e) => to_string(&e).unwrap_or_default(),
-                MonitorEvent::Syscall(e) => to_string(&e).unwrap_or_default(),
-                MonitorEvent::UserActivity(e) => to_string(&e).unwrap_or_default(),
-                MonitorEvent::ScreenSharing(e) => to_string(&e).unwrap_or_default(),
-                MonitorEvent::NetworkDomain(e) => format!("{:?}", e),
-                MonitorEvent::ProcessSuspicion(e) => format!("{:?}", e),
-            };
+                if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
+                    error!("Failed to log correlated event: {}", e);
+                }
 
-            let log_entry = format!(
-                r#"{{"type": "{}", "student_code": "{}", "timestamp": "{}", "data": {}}}"#,
-                event_type_str,
-                student_code_clone.as_deref().unwrap_or("local_test"),
-                chrono::Utc::now().to_rfc3339(),
-                log_entry_data
-            );
-
-            if let Err(e) = file_logger_clone.append_to_log_file(&log_entry) {
-                error!("Failed to log {} suspicion: {}", event_type_str, e);
-            }
-
-            #[cfg(not(feature = "local_test"))]
-            if let Some(network_client_arc) = network_client_option.as_ref() {
-                if let Err(e) = network_client_arc.send_data(log_entry).await {
-                    error!("Failed to send {} suspicion to teacher PC: {}", event_type_str, e);
+                #[cfg(not(feature = "local_test"))]
+                if let Some(network_client_arc) = network_client_clone_for_receiver.as_ref() {
+                    if let Err(e) = network_client_arc.send_data(log_entry).await {
+                        error!("Failed to send correlated event to teacher PC: {}", e);
+                    }
                 }
             }
         }
