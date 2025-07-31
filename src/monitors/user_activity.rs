@@ -6,6 +6,7 @@ use std::thread;
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn, error};
 use serde::{Serialize, Deserialize};
+use crate::config::UserActivityConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserActivityEvent {
@@ -50,61 +51,30 @@ pub struct TypingAnalysis {
 }
 
 pub struct UserActivityMonitor {
+    config: UserActivityConfig,
     keystroke_patterns: Arc<Mutex<VecDeque<KeystrokeEvent>>>,
     command_history: Arc<Mutex<Vec<CommandEvent>>>,
-    suspicious_clipboard_content: Vec<String>,
-    suspicious_commands: Vec<String>,
     monitoring_active: bool,
     history_limit: usize,
 }
 
 impl UserActivityMonitor {
-    pub fn new() -> Self {
+    pub fn new(config: UserActivityConfig) -> Self {
         UserActivityMonitor {
+            config,
             keystroke_patterns: Arc::new(Mutex::new(VecDeque::with_capacity(1000))),
             command_history: Arc::new(Mutex::new(Vec::new())),
-            suspicious_clipboard_content: Self::init_suspicious_clipboard_patterns(),
-            suspicious_commands: Self::init_suspicious_commands(),
             monitoring_active: false,
             history_limit: 1000,
         }
     }
 
-    fn init_suspicious_clipboard_patterns() -> Vec<String> {
-        vec![
-            "api_key".to_string(),
-            "openai".to_string(),
-            "anthropic".to_string(),
-            "chatgpt".to_string(),
-            "claude".to_string(),
-            "gpt-".to_string(),
-            "sk-".to_string(),         // OpenAI API key prefix
-            "Bearer ".to_string(),     // Common API token format
-            "Authorization:".to_string(),
-            "prompt:".to_string(),
-            "system:".to_string(),
-            "assistant:".to_string(),
-            "human:".to_string(),
-        ]
-    }
-
-    fn init_suspicious_commands() -> Vec<String> {
-        vec![
-            "pip install openai".to_string(),
-            "pip install anthropic".to_string(),
-            "pip install transformers".to_string(),
-            "pip install torch".to_string(),
-            "git clone".to_string(),
-            "curl -X POST".to_string(),
-            "wget".to_string(),
-            "ollama".to_string(),
-            "llamacpp".to_string(),
-            "gpt4all".to_string(),
-            "conda install".to_string(),
-        ]
-    }
-
     pub fn start_monitoring(&mut self) -> Result<(), String> {
+        if !self.config.enabled {
+            info!("User activity monitoring is disabled in configuration.");
+            return Ok(());
+        }
+
         if self.monitoring_active {
             return Ok(());
         }
@@ -125,7 +95,7 @@ impl UserActivityMonitor {
     }
 
     fn start_clipboard_monitoring(&self) -> Result<(), String> {
-        let suspicious_patterns = self.suspicious_clipboard_content.clone();
+        let suspicious_patterns = self.config.suspicious_clipboard_content.clone();
         
         thread::spawn(move || {
             let mut last_clipboard_content = String::new();
@@ -202,7 +172,7 @@ impl UserActivityMonitor {
 
     fn start_command_monitoring(&self) -> Result<(), String> {
         let command_history = Arc::clone(&self.command_history);
-        let suspicious_commands = self.suspicious_commands.clone();
+        let suspicious_commands = self.config.suspicious_commands.clone();
         
         thread::spawn(move || {
             let mut last_history_size = 0;
@@ -424,7 +394,7 @@ impl UserActivityMonitor {
         if let Ok(history) = self.command_history.lock() {
             for command_event in history.iter() {
                 if command_event.timestamp >= since {
-                    let is_suspicious = self.suspicious_commands.iter()
+                    let is_suspicious = self.config.suspicious_commands.iter()
                         .any(|sus| command_event.command.to_lowercase().contains(&sus.to_lowercase()));
 
                     if is_suspicious {

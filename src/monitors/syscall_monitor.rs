@@ -4,6 +4,7 @@ use std::process::Command;
 use std::fs;
 use tracing::{info, warn, error};
 use serde::{Serialize, Deserialize};
+use crate::config::{SyscallConfig, SyscallPatternConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyscallEvent {
@@ -34,91 +35,33 @@ pub struct AIDetection {
 }
 
 pub struct SyscallMonitor {
+    config: SyscallConfig,
     monitoring_active: bool,
-    ai_patterns: Vec<SyscallPattern>,
+    ai_patterns: Vec<SyscallPatternConfig>, // Changed type to SyscallPatternConfig
     process_syscall_history: HashMap<u32, VecDeque<SyscallEvent>>,
     history_limit: usize,
     detection_window: Duration,
 }
 
 impl SyscallMonitor {
-    pub fn new() -> Self {
+    pub fn new(config: SyscallConfig) -> Self {
+        let ai_patterns = config.ai_patterns.clone(); // Clone patterns before moving config
         SyscallMonitor {
+            config,
             monitoring_active: false,
-            ai_patterns: Self::init_ai_patterns(),
+            ai_patterns,
             process_syscall_history: HashMap::new(),
             history_limit: 1000,
             detection_window: Duration::from_secs(30),
         }
     }
 
-    fn init_ai_patterns() -> Vec<SyscallPattern> {
-        vec![
-            SyscallPattern {
-                name: "GPU_Computing".to_string(),
-                syscalls: vec![
-                    "openat".to_string(),      // Opening GPU device files
-                    "ioctl".to_string(),       // GPU control operations
-                    "mmap".to_string(),        // Memory mapping for GPU
-                    "write".to_string(),       // GPU command submission
-                    "read".to_string(),        // GPU result reading
-                ],
-                confidence: 0.7,
-                description: "Pattern indicating GPU computation usage".to_string(),
-            },
-            SyscallPattern {
-                name: "AI_Model_Loading".to_string(),
-                syscalls: vec![
-                    "openat".to_string(),      // Opening model files
-                    "fstat".to_string(),       // Getting file statistics
-                    "mmap".to_string(),        // Memory mapping large files
-                    "madvise".to_string(),     // Memory usage hints
-                    "brk".to_string(),         // Heap expansion
-                ],
-                confidence: 0.8,
-                description: "Pattern for loading large AI model files".to_string(),
-            },
-            SyscallPattern {
-                name: "Network_AI_API".to_string(),
-                syscalls: vec![
-                    "socket".to_string(),      // Creating network sockets
-                    "connect".to_string(),     // Connecting to AI APIs
-                    "sendto".to_string(),      // Sending API requests
-                    "recvfrom".to_string(),    // Receiving API responses
-                    "write".to_string(),       // Writing HTTPS data
-                    "read".to_string(),        // Reading HTTPS data
-                ],
-                confidence: 0.6,
-                description: "Pattern for AI API communication".to_string(),
-            },
-            SyscallPattern {
-                name: "Large_Memory_Operations".to_string(),
-                syscalls: vec![
-                    "mmap".to_string(),        // Large memory mappings
-                    "munmap".to_string(),      // Memory unmapping
-                    "mprotect".to_string(),    // Memory protection changes
-                    "madvise".to_string(),     // Memory usage optimization
-                    "brk".to_string(),         // Heap operations
-                ],
-                confidence: 0.5,
-                description: "Pattern for large memory operations typical of AI workloads".to_string(),
-            },
-            SyscallPattern {
-                name: "Python_AI_Execution".to_string(),
-                syscalls: vec![
-                    "execve".to_string(),      // Executing Python
-                    "openat".to_string(),      // Opening Python modules
-                    "stat".to_string(),        // Checking file existence
-                    "access".to_string(),      // File access checks
-                    "write".to_string(),       // Output operations
-                ],
-                confidence: 0.7,
-                description: "Pattern for Python-based AI tool execution".to_string(),
-            },
-        ]
-    }
-
     pub fn start_monitoring(&mut self) -> Result<(), String> {
+        if !self.config.enabled {
+            info!("Syscall monitoring is disabled in configuration.");
+            return Ok(());
+        }
+
         if self.monitoring_active {
             return Ok(());
         }
@@ -278,6 +221,10 @@ impl SyscallMonitor {
         let mut detections = Vec::new();
         let now = SystemTime::now();
 
+        if !self.config.enabled {
+            return detections;
+        }
+
         for (&pid, history) in &self.process_syscall_history {
             // Only analyze recent events
             let recent_events: Vec<&SyscallEvent> = history
@@ -294,7 +241,7 @@ impl SyscallMonitor {
 
             let process_name = recent_events[0].process_name.clone();
 
-            for pattern in &self.ai_patterns {
+            for pattern in &self.config.ai_patterns { // Use config for patterns
                 let matching_syscalls = self.find_pattern_matches(&recent_events, pattern);
                 
                 if !matching_syscalls.is_empty() {
@@ -317,7 +264,7 @@ impl SyscallMonitor {
         detections
     }
 
-    fn find_pattern_matches(&self, events: &[&SyscallEvent], pattern: &SyscallPattern) -> Vec<String> {
+    fn find_pattern_matches(&self, events: &[&SyscallEvent], pattern: &SyscallPatternConfig) -> Vec<String> { // Changed pattern type
         let mut matches = Vec::new();
         let event_syscalls: Vec<&str> = events.iter().map(|e| e.syscall_name.as_str()).collect();
 
@@ -330,7 +277,7 @@ impl SyscallMonitor {
         matches
     }
 
-    fn calculate_pattern_confidence(&self, pattern: &SyscallPattern, matches: &[String], events: &[&SyscallEvent]) -> f64 {
+    fn calculate_pattern_confidence(&self, pattern: &SyscallPatternConfig, matches: &[String], events: &[&SyscallEvent]) -> f64 { // Changed pattern type
         let base_confidence = pattern.confidence;
         let match_ratio = matches.len() as f64 / pattern.syscalls.len() as f64;
         
@@ -400,10 +347,26 @@ impl SyscallMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SyscallConfig;
+
+    fn create_test_config() -> SyscallConfig {
+        SyscallConfig {
+            enabled: true,
+            ai_patterns: vec![
+                SyscallPatternConfig {
+                    name: "GPU_Computing".to_string(),
+                    syscalls: vec!["openat".to_string(), "ioctl".to_string()],
+                    confidence: 0.7,
+                    description: "Test GPU pattern".to_string(),
+                },
+            ],
+        }
+    }
 
     #[test]
     fn test_pattern_matching() {
-        let monitor = SyscallMonitor::new();
+        let config = create_test_config();
+        let monitor = SyscallMonitor::new(config);
         let events = vec![
             SyscallEvent {
                 pid: 123,
@@ -424,7 +387,7 @@ mod tests {
         ];
 
         let event_refs: Vec<&SyscallEvent> = events.iter().collect();
-        let gpu_pattern = &monitor.ai_patterns[0]; // GPU_Computing pattern
+        let gpu_pattern = &monitor.config.ai_patterns[0]; // GPU_Computing pattern
         
         let matches = monitor.find_pattern_matches(&event_refs, gpu_pattern);
         assert!(!matches.is_empty());

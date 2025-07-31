@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use regex::Regex;
 use tracing::{info, warn, error};
 use serde::{Serialize, Deserialize};
+use crate::config::OutputAnalysisConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
@@ -33,60 +34,19 @@ impl Default for AnalysisScores {
 }
 
 pub struct OutputAnalyzer {
+    config: OutputAnalysisConfig,
     ai_patterns: Vec<Regex>,
-    perplexity_threshold: f64,
-    burstiness_threshold: f64,
-    keyword_threshold: f64,
-    suspicious_phrases: Vec<String>,
 }
 
 impl OutputAnalyzer {
-    pub fn new() -> Self {
+    pub fn new(config: OutputAnalysisConfig) -> Self {
+        let ai_patterns = config.suspicious_phrases.iter()
+            .filter_map(|p| Regex::new(&format!("(?i){}", regex::escape(p))).ok())
+            .collect();
         OutputAnalyzer {
-            ai_patterns: Self::compile_ai_patterns(),
-            perplexity_threshold: 0.7,
-            burstiness_threshold: 0.3,
-            keyword_threshold: 0.15,
-            suspicious_phrases: Self::init_suspicious_phrases(),
+            config,
+            ai_patterns,
         }
-    }
-
-    fn compile_ai_patterns() -> Vec<Regex> {
-        let patterns = [
-            r"(?i)as an ai (language model|assistant)",
-            r"(?i)i don't have personal (experiences|opinions|feelings)",
-            r"(?i)i cannot (provide|access|browse|remember)",
-            r"(?i)as of my last (update|training|knowledge cutoff)",
-            r"(?i)i'm (just|only) an ai",
-            r"(?i)my training data",
-            r"(?i)i was trained (on|by)",
-            r"(?i)according to my training",
-            r"(?i)based on my knowledge",
-            r"(?i)here's what i (can tell you|know)",
-            r"(?i)let me (help|assist) you with",
-            r"(?i)i'd be happy to help",
-            r"(?i)certainly[!.] here's",
-            r"(?i)of course[!.] (here's|i can)",
-        ];
-
-        patterns
-            .iter()
-            .filter_map(|p| Regex::new(p).ok())
-            .collect()
-    }
-
-    fn init_suspicious_phrases() -> Vec<String> {
-        vec![
-            "as an AI".to_string(),
-            "language model".to_string(),
-            "training data".to_string(),
-            "knowledge cutoff".to_string(),
-            "I don't have personal".to_string(),
-            "I cannot browse".to_string(),
-            "I cannot access".to_string(),
-            "my last update".to_string(),
-            "based on my training".to_string(),
-        ]
     }
 
     pub fn analyze_text(&self, text: &str) -> AnalysisResult {
@@ -95,13 +55,13 @@ impl OutputAnalyzer {
 
         // Perplexity analysis
         scores.perplexity = self.calculate_perplexity(text);
-        if scores.perplexity < self.perplexity_threshold {
+        if scores.perplexity < self.config.perplexity_threshold {
             reasons.push("Low perplexity detected (characteristic of AI text)".to_string());
         }
 
         // Burstiness analysis
         scores.burstiness = self.calculate_burstiness(text);
-        if scores.burstiness < self.burstiness_threshold {
+        if scores.burstiness < self.config.burstiness_threshold {
             reasons.push("Low burstiness detected (uniform sentence structure)".to_string());
         }
 
@@ -119,7 +79,7 @@ impl OutputAnalyzer {
 
         // Keyword density
         scores.keyword_density = self.calculate_keyword_density(text);
-        if scores.keyword_density > self.keyword_threshold {
+        if scores.keyword_density > self.config.keyword_threshold {
             reasons.push("High density of AI-related keywords".to_string());
         }
 
@@ -266,7 +226,7 @@ impl OutputAnalyzer {
             return 0.0;
         }
 
-        let keyword_count = self.suspicious_phrases
+        let keyword_count = self.config.suspicious_phrases
             .iter()
             .map(|phrase| text.to_lowercase().matches(&phrase.to_lowercase()).count())
             .sum::<usize>() as f64;
@@ -278,13 +238,13 @@ impl OutputAnalyzer {
         let mut confidence = 0.0;
         
         // Perplexity weight
-        if scores.perplexity < self.perplexity_threshold {
-            confidence += 0.25 * (self.perplexity_threshold - scores.perplexity) / self.perplexity_threshold;
+        if scores.perplexity < self.config.perplexity_threshold {
+            confidence += 0.25 * (self.config.perplexity_threshold - scores.perplexity) / self.config.perplexity_threshold;
         }
         
         // Burstiness weight
-        if scores.burstiness < self.burstiness_threshold {
-            confidence += 0.20 * (self.burstiness_threshold - scores.burstiness) / self.burstiness_threshold;
+        if scores.burstiness < self.config.burstiness_threshold {
+            confidence += 0.20 * (self.config.burstiness_threshold - scores.burstiness) / self.config.burstiness_threshold;
         }
         
         // Pattern matches weight
@@ -294,7 +254,7 @@ impl OutputAnalyzer {
         confidence += 0.15 * scores.stylistic_score;
         
         // Keyword density weight
-        confidence += 0.10 * (scores.keyword_density / self.keyword_threshold).min(1.0);
+        confidence += 0.10 * (scores.keyword_density / self.config.keyword_threshold).min(1.0);
         
         confidence.min(1.0)
     }
@@ -303,10 +263,25 @@ impl OutputAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::OutputAnalysisConfig;
+
+    fn create_test_config() -> OutputAnalysisConfig {
+        OutputAnalysisConfig {
+            enabled: true,
+            perplexity_threshold: 0.7,
+            burstiness_threshold: 0.3,
+            keyword_threshold: 0.15,
+            suspicious_phrases: vec![
+                "as an AI".to_string(),
+                "language model".to_string(),
+            ],
+        }
+    }
 
     #[test]
     fn test_ai_text_detection() {
-        let analyzer = OutputAnalyzer::new();
+        let config = create_test_config();
+        let analyzer = OutputAnalyzer::new(config);
         
         let ai_text = "As an AI language model, I don't have personal experiences. However, I can provide information based on my training data.";
         let result = analyzer.analyze_text(ai_text);
@@ -318,7 +293,8 @@ mod tests {
 
     #[test]
     fn test_human_text_detection() {
-        let analyzer = OutputAnalyzer::new();
+        let config = create_test_config();
+        let analyzer = OutputAnalyzer::new(config);
         
         let human_text = "Hey! I went to the store yesterday and it was crazy busy. The lines were so long, I almost gave up. But I really needed milk so I stuck it out.";
         let result = analyzer.analyze_text(human_text);

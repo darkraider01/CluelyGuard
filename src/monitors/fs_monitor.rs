@@ -6,6 +6,7 @@ use std::time::{SystemTime, Duration};
 use std::fs;
 use tracing::{info, warn, error};
 use serde::{Serialize, Deserialize};
+use crate::config::FileSystemConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileSystemEvent {
@@ -18,72 +19,29 @@ pub struct FileSystemEvent {
     pub file_extension: Option<String>,
 }
 
-#[derive(Debug)]
 pub struct FileSystemMonitor {
+    config: FileSystemConfig,
     watcher: Option<RecommendedWatcher>,
     receiver: Option<Receiver<Result<Event, notify::Error>>>,
-    suspicious_extensions: HashSet<String>,
-    ai_model_paths: Vec<String>,
-    monitoring_paths: Vec<String>,
-    large_file_threshold: u64,
     recent_events: HashMap<PathBuf, SystemTime>,
 }
 
 impl FileSystemMonitor {
-    pub fn new() -> Self {
+    pub fn new(config: FileSystemConfig) -> Self {
         FileSystemMonitor {
+            config,
             watcher: None,
             receiver: None,
-            suspicious_extensions: Self::init_suspicious_extensions(),
-            ai_model_paths: Self::init_ai_model_paths(),
-            monitoring_paths: Self::init_monitoring_paths(),
-            large_file_threshold: 100 * 1024 * 1024, // 100MB
             recent_events: HashMap::new(),
         }
     }
 
-    fn init_suspicious_extensions() -> HashSet<String> {
-        vec![
-            ".gguf".to_string(),
-            ".bin".to_string(),
-            ".pt".to_string(),
-            ".pth".to_string(),
-            ".safetensors".to_string(),
-            ".pkl".to_string(),
-            ".h5".to_string(),
-            ".onnx".to_string(),
-            ".tflite".to_string(),
-            ".pb".to_string(),
-            ".model".to_string(),
-            ".weights".to_string(),
-        ].into_iter().collect()
-    }
-
-    fn init_ai_model_paths() -> Vec<String> {
-        vec![
-            "~/.cache/huggingface".to_string(),
-            "~/.ollama".to_string(),
-            "~/llamacpp".to_string(),
-            "~/.cache/torch".to_string(),
-            "~/.transformers".to_string(),
-            "~/.local/share/oobabooga".to_string(),
-            "~/text-generation-webui".to_string(),
-            "~/.cache/gpt4all".to_string(),
-        ]
-    }
-
-    fn init_monitoring_paths() -> Vec<String> {
-        vec![
-            "/tmp".to_string(),
-            "~/Downloads".to_string(),
-            "~/Documents".to_string(),
-            "~/.local/share".to_string(),
-            "~/.cache".to_string(),
-            "/var/tmp".to_string(),
-        ]
-    }
-
     pub fn start_monitoring(&mut self) -> NotifyResult<()> {
+        if !self.config.enabled {
+            info!("File system monitoring is disabled in configuration.");
+            return Ok(());
+        }
+
         let (tx, rx) = channel();
         
         let mut watcher = RecommendedWatcher::new(
@@ -92,7 +50,7 @@ impl FileSystemMonitor {
         )?;
 
         // Watch configured directories
-        for path_str in &self.monitoring_paths {
+        for path_str in &self.config.monitoring_paths {
             let expanded_path = shellexpand::tilde(path_str);
             let path = Path::new(expanded_path.as_ref());
             
@@ -105,7 +63,7 @@ impl FileSystemMonitor {
         }
 
         // Watch AI-specific directories
-        for path_str in &self.ai_model_paths {
+        for path_str in &self.config.ai_model_paths {
             let expanded_path = shellexpand::tilde(path_str);
             let path = Path::new(expanded_path.as_ref());
             
@@ -193,14 +151,14 @@ impl FileSystemMonitor {
     fn analyze_event(&self, event: &Event, path: &Path, file_size: Option<&u64>, file_extension: Option<&String>) -> (bool, String) {
         // Check for suspicious file extensions
         if let Some(ext) = file_extension {
-            if self.suspicious_extensions.contains(ext) {
+            if self.config.suspicious_extensions.contains(ext) {
                 return (true, format!("Suspicious AI model file extension: {}", ext));
             }
         }
 
         // Check for large files
         if let Some(&size) = file_size {
-            if size > self.large_file_threshold {
+            if size > self.config.large_file_threshold_mb * 1024 * 1024 {
                 return (true, format!("Large file created/modified: {} MB", size / (1024 * 1024)));
             }
         }
@@ -222,7 +180,7 @@ impl FileSystemMonitor {
         if let EventKind::Create(_) = event.kind {
             if path_str.contains("download") || path_str.contains("temp") {
                 if let Some(ext) = file_extension {
-                    if self.suspicious_extensions.contains(ext) {
+                    if self.config.suspicious_extensions.contains(ext) {
                         return (true, "AI model file download detected".to_string());
                     }
                 }
@@ -269,7 +227,11 @@ impl FileSystemMonitor {
         let mut suspicious_files = Vec::new();
         let now = SystemTime::now();
 
-        for path_str in &self.ai_model_paths {
+        if !self.config.enabled {
+            return suspicious_files;
+        }
+
+        for path_str in &self.config.ai_model_paths {
             let expanded_path = shellexpand::tilde(path_str);
             let path = Path::new(expanded_path.as_ref());
             
@@ -336,13 +298,25 @@ impl Drop for FileSystemMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::FileSystemConfig;
     use std::fs::File;
     use std::io::Write;
     use tempfile::TempDir;
 
+    fn create_test_config() -> FileSystemConfig {
+        FileSystemConfig {
+            enabled: true,
+            suspicious_extensions: vec![".gguf".to_string(), ".testext".to_string()],
+            ai_model_paths: vec!["/tmp/test_ai_models".to_string()],
+            monitoring_paths: vec!["/tmp/test_monitoring".to_string()],
+            large_file_threshold_mb: 1, // 1MB for testing
+        }
+    }
+
     #[test]
     fn test_suspicious_file_detection() {
-        let monitor = FileSystemMonitor::new();
+        let config = create_test_config();
+        let monitor = FileSystemMonitor::new(config);
         let temp_dir = TempDir::new().unwrap();
         let suspicious_file = temp_dir.path().join("model.gguf");
         
@@ -355,5 +329,36 @@ mod tests {
         
         assert!(is_suspicious);
         assert!(reason.contains("Suspicious AI model file extension"));
+    }
+
+    #[test]
+    fn test_large_file_detection() {
+        let mut config = create_test_config();
+        config.large_file_threshold_mb = 1; // 1MB threshold
+        let monitor = FileSystemMonitor::new(config);
+        let temp_dir = TempDir::new().unwrap();
+        let large_file = temp_dir.path().join("large_file.bin");
+        
+        // Create a 2MB file
+        let mut file = File::create(&large_file).unwrap();
+        file.write_all(&vec![0; 2 * 1024 * 1024]).unwrap();
+        
+        let fake_event = Event::new(EventKind::Create(notify::event::CreateKind::File));
+        let file_size = Some(2 * 1024 * 1024);
+        
+        let (is_suspicious, reason) = monitor.analyze_event(&fake_event, &large_file, file_size.as_ref(), None);
+        
+        assert!(is_suspicious);
+        assert!(reason.contains("Large file created/modified"));
+    }
+
+    #[test]
+    fn test_monitoring_disabled() {
+        let config = FileSystemConfig { enabled: false, ..create_test_config() };
+        let mut monitor = FileSystemMonitor::new(config);
+        
+        assert!(monitor.start_monitoring().is_ok()); // Should return Ok(()) even if disabled
+        // No events should be processed if monitoring is disabled
+        assert!(monitor.get_events().is_empty());
     }
 }

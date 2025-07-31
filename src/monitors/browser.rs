@@ -3,40 +3,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use glob::glob;
 use tracing::{info, warn, error};
-
-/// List of suspicious extension keywords (may be refined or loaded from config in the future).
-const SUSPICIOUS_KEYWORDS: &[&str] = &[
-    "chatgpt",
-    "copilot",
-    "claude",
-    "bard",
-    "openai",
-    "gpt",
-    "anthropic",
-    "llm",
-];
-
-/// List of browser history database paths (expand to support more browsers).
-const BROWSER_HISTORY_PATHS: &[&str] = &[
-    "~/.config/google-chrome/Default/History",
-    "~/.config/chromium/Default/History",
-    "~/.config/BraveSoftware/Brave-Browser/Default/History",
-    "~/.mozilla/firefox/*.default-release/places.sqlite",
-];
-
-/// Extension directories to scan.
-const EXTENSION_PATHS: &[&str] = &[
-    "~/.config/google-chrome/Default/Extensions",
-    "~/.config/chromium/Default/Extensions",
-    "~/.mozilla/firefox/*.default-release/extensions",
-    "~/.mozilla/firefox/*.default/extensions",
-    // Brave locations:
-    "~/.config/BraveSoftware/Brave-Browser/Default/Extensions",
-    "~/.config/brave/Extensions",
-    "~/.local/share/brave/Brave-Browser/Default/Extensions",
-    // Snap/Flatpak:
-    "~/snap/brave/current/.config/BraveSoftware/Brave-Browser/Default/Extensions",
-];
+use crate::config::BrowserConfig;
 
 /// Structure to represent a detected suspicious extension.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -50,20 +17,22 @@ pub struct SuspiciousExtension {
 
 /// Main BrowserMonitor struct.
 pub struct BrowserMonitor {
-    suspicious_keywords: Vec<String>,
+    config: BrowserConfig,
 }
 
 impl BrowserMonitor {
-    pub fn new() -> Self {
-        Self {
-            suspicious_keywords: SUSPICIOUS_KEYWORDS.iter().map(|&s| s.to_string()).collect(),
-        }
+    pub fn new(config: BrowserConfig) -> Self {
+        Self { config }
     }
 
     /// Scan all supported browsers for suspicious extensions.
     pub fn scan_all_extensions(&self) -> Vec<SuspiciousExtension> {
         let mut results = Vec::new();
-        for ext_path in EXTENSION_PATHS {
+        if !self.config.enabled {
+            return results;
+        }
+
+        for ext_path in &self.config.extension_paths {
             let expanded_path = shellexpand::tilde(ext_path).to_string();
             for entry in glob(&expanded_path.replace("\\", "/"))
                 .expect("Failed to read glob pattern")
@@ -94,7 +63,7 @@ impl BrowserMonitor {
                         let manifest = version_path.join("manifest.json");
                         if manifest.is_file() {
                             if let Ok(meta) = Self::parse_manifest(&manifest) {
-                                for keyword in &self.suspicious_keywords {
+                                for keyword in &self.config.suspicious_keywords {
                                     if meta.0.to_lowercase().contains(keyword)
                                         || meta.1.to_lowercase().contains(keyword)
                                     {
@@ -142,13 +111,34 @@ impl BrowserMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::BrowserConfig;
+
+    fn create_test_browser_config() -> BrowserConfig {
+        BrowserConfig {
+            enabled: true,
+            suspicious_keywords: vec!["test_ai".to_string()],
+            extension_paths: vec![
+                "~/.config/google-chrome/Default/Extensions".to_string(),
+            ],
+        }
+    }
 
     #[test]
-    fn test_scan_extensions() {
-        let monitor = BrowserMonitor::new();
+    fn test_scan_extensions_disabled() {
+        let config = BrowserConfig { enabled: false, ..create_test_browser_config() };
+        let monitor = BrowserMonitor::new(config);
         let results = monitor.scan_all_extensions();
-        for ext in results {
-            println!("{:?}", ext);
-        }
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_scan_extensions_with_keywords() {
+        // This test requires a mock file system or actual extensions to be present
+        // For now, it will just test the logic with a dummy config
+        let config = create_test_browser_config();
+        let monitor = BrowserMonitor::new(config);
+        let results = monitor.scan_all_extensions();
+        // Assertions would go here if we had a mock file system setup
+        println!("Found {} extensions (mocked): {:?}", results.len(), results);
     }
 }

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, Duration};
 use tracing::{warn, error};
 use serde::{Serialize, Deserialize};
+use crate::config::ScreenSharingConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScreenCaptureEvent {
@@ -24,7 +25,7 @@ pub enum CaptureType {
 }
 
 pub struct ScreenSharingMonitor {
-    known_screen_apps: Vec<String>,
+    config: ScreenSharingConfig,
     wayland_session: bool,
     last_scan: Option<SystemTime>,
     scan_interval: Duration,
@@ -32,11 +33,11 @@ pub struct ScreenSharingMonitor {
 }
 
 impl ScreenSharingMonitor {
-    pub fn new() -> Self {
+    pub fn new(config: ScreenSharingConfig) -> Self {
         let wayland_session = std::env::var("WAYLAND_DISPLAY").is_ok();
         
         ScreenSharingMonitor {
-            known_screen_apps: Self::init_screen_apps(),
+            config,
             wayland_session,
             last_scan: None,
             scan_interval: Duration::from_secs(5),
@@ -44,41 +45,12 @@ impl ScreenSharingMonitor {
         }
     }
 
-    fn init_screen_apps() -> Vec<String> {
-        vec![
-            // Screen recording applications
-            "obs".to_string(),
-            "obs-studio".to_string(),
-            "ffmpeg".to_string(),
-            "wf-recorder".to_string(),
-            "gstreamer".to_string(),
-            "cheese".to_string(),
-            "guvcview".to_string(),
-            "kazam".to_string(),
-            "recordmydesktop".to_string(),
-            "simplescreenrecorder".to_string(),
-            
-            // Video conferencing with screen sharing
-            "zoom".to_string(),
-            "skype".to_string(),
-            "teams".to_string(),
-            "discord".to_string(),
-            "slack".to_string(),
-            "google-chrome".to_string(),
-            "firefox".to_string(),
-            "chromium".to_string(),
-            
-            // Remote desktop applications
-            "x11vnc".to_string(),
-            "vino".to_string(),
-            "remmina".to_string(),
-            "xrdp".to_string(),
-            "teamviewer".to_string(),
-            "anydesk".to_string(),
-        ]
-    }
-
     pub fn detect_screen_capture(&mut self) -> Vec<ScreenCaptureEvent> {
+        let mut events = Vec::new();
+        if !self.config.enabled {
+            return events;
+        }
+
         let now = SystemTime::now();
         
         // Rate limit scanning
@@ -89,8 +61,6 @@ impl ScreenSharingMonitor {
         }
         
         self.last_scan = Some(now);
-        
-        let mut events = Vec::new();
         
         if self.wayland_session {
             events.extend(self.detect_wayland_capture());
@@ -230,7 +200,7 @@ impl ScreenSharingMonitor {
                 let pid: u32 = fields[1].parse().unwrap_or(0);
                 
                 // Check against known screen capture applications
-                for app in &self.known_screen_apps {
+                for app in &self.config.known_screen_apps {
                     if command.to_lowercase().contains(&app.to_lowercase()) {
                         let capture_type = self.determine_capture_type(&command);
                         let confidence = self.calculate_confidence(&command, app);
@@ -413,10 +383,19 @@ impl ScreenSharingMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ScreenSharingConfig;
+
+    fn create_test_config() -> ScreenSharingConfig {
+        ScreenSharingConfig {
+            enabled: true,
+            known_screen_apps: vec!["test_app".to_string()],
+        }
+    }
 
     #[test]
     fn test_capture_type_detection() {
-        let monitor = ScreenSharingMonitor::new();
+        let config = create_test_config();
+        let monitor = ScreenSharingMonitor::new(config);
         
         assert!(matches!(
             monitor.determine_capture_type("ffmpeg -f x11grab -i :0.0 output.mp4"),
@@ -431,7 +410,8 @@ mod tests {
 
     #[test]
     fn test_confidence_calculation() {
-        let monitor = ScreenSharingMonitor::new();
+        let config = create_test_config();
+        let monitor = ScreenSharingMonitor::new(config);
         
         let confidence = monitor.calculate_confidence("obs --startrecording", "obs");
         assert!(confidence > 0.7);

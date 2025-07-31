@@ -82,6 +82,178 @@ monitoring:
     check_interval_seconds: 10
     pulse_audio_timeout_ms: 1000
 
+  browser:
+    enabled: true
+    suspicious_keywords:
+      - "chatgpt"
+      - "copilot"
+      - "claude"
+      - "bard"
+      - "openai"
+      - "gpt"
+      - "anthropic"
+      - "llm"
+    extension_paths:
+      - "~/.config/google-chrome/Default/Extensions"
+      - "~/.config/chromium/Default/Extensions"
+      - "~/.mozilla/firefox/*.default-release/extensions"
+      - "~/.mozilla/firefox/*.default/extensions"
+      - "~/.config/BraveSoftware/Brave-Browser/Default/Extensions"
+      - "~/.config/brave/Extensions"
+      - "~/.local/share/brave/Brave-Browser/Default/Extensions"
+      - "~/snap/brave/current/.config/BraveSoftware/Brave-Browser/Default/Extensions"
+
+  file_system:
+    enabled: true
+    suspicious_extensions:
+      - ".gguf"
+      - ".bin"
+      - ".pt"
+      - ".pth"
+      - ".safetensors"
+      - ".pkl"
+      - ".h5"
+      - ".onnx"
+      - ".tflite"
+      - ".pb"
+      - ".model"
+      - ".weights"
+    ai_model_paths:
+      - "~/.cache/huggingface"
+      - "~/.ollama"
+      - "~/llamacpp"
+      - "~/.cache/torch"
+      - "~/.transformers"
+      - "~/.local/share/oobabooga"
+      - "~/text-generation-webui"
+      - "~/.cache/gpt4all"
+    monitoring_paths:
+      - "/tmp"
+      - "~/Downloads"
+      - "~/Documents"
+      - "~/.local/share"
+      - "~/.cache"
+      - "/var/tmp"
+    large_file_threshold_mb: 100
+
+  network:
+    enabled: true
+    suspicious_llm_domains:
+      - "openai.com"
+      - "anthropic.com"
+      - "perplexity.ai"
+      - "cohere.ai"
+      - "huggingface.co"
+      - "deepmind.com"
+      - "nvidia.com"
+      - "replicate.com"
+      - "ai.google.com"
+      - "aws.amazon.com"
+      - "azure.microsoft.com"
+      - "cloud.google.com"
+
+  output_analysis:
+    enabled: true
+    perplexity_threshold: 0.7
+    burstiness_threshold: 0.3
+    keyword_threshold: 0.15
+    suspicious_phrases:
+      - "as an AI"
+      - "language model"
+      - "training data"
+      - "knowledge cutoff"
+      - "I don't have personal"
+      - "I cannot browse"
+      - "I cannot access"
+      - "my last update"
+      - "based on my training"
+
+  screensharing:
+    enabled: true
+    known_screen_apps:
+      - "obs"
+      - "obs-studio"
+      - "ffmpeg"
+      - "wf-recorder"
+      - "gstreamer"
+      - "cheese"
+      - "guvcview"
+      - "kazam"
+      - "recordmydesktop"
+      - "simplescreenrecorder"
+      - "zoom"
+      - "skype"
+      - "teams"
+      - "discord"
+      - "slack"
+      - "google-chrome"
+      - "firefox"
+      - "chromium"
+      - "x11vnc"
+      - "vino"
+      - "remmina"
+      - "xrdp"
+      - "teamviewer"
+      - "anydesk"
+
+  syscall:
+    enabled: true
+    ai_patterns:
+      - name: "GPU_Computing"
+        syscalls: ["openat", "ioctl", "mmap", "write", "read"]
+        confidence: 0.7
+        description: "Pattern indicating GPU computation usage"
+      - name: "AI_Model_Loading"
+        syscalls: ["openat", "fstat", "mmap", "madvise", "brk"]
+        confidence: 0.8
+        description: "Pattern for loading large AI model files"
+      - name: "Network_AI_API"
+        syscalls: ["socket", "connect", "sendto", "recvfrom", "write", "read"]
+        confidence: 0.6
+        description: "Pattern for AI API communication"
+      - name: "Large_Memory_Operations"
+        syscalls: ["mmap", "munmap", "mprotect", "madvise", "brk"]
+        confidence: 0.5
+        description: "Pattern for large memory operations typical of AI workloads"
+      - name: "Python_AI_Execution"
+        syscalls: ["execve", "openat", "stat", "access", "write"]
+        confidence: 0.7
+        description: "Pattern for Python-based AI tool execution"
+
+  user_activity:
+    enabled: true
+    suspicious_clipboard_content:
+      - "api_key"
+      - "openai"
+      - "anthropic"
+      - "chatgpt"
+      - "claude"
+      - "gpt-"
+      - "sk-"
+      - "Bearer "
+      - "Authorization:"
+      - "prompt:"
+      - "system:"
+      - "assistant:"
+      - "human:"
+    suspicious_commands:
+      - "pip install openai"
+      - "pip install anthropic"
+      - "pip install transformers"
+      - "pip install torch"
+      - "git clone"
+      - "curl -X POST"
+      - "wget"
+      - "ollama"
+      - "llamacpp"
+      - "gpt4all"
+      - "conda install"
+
+  correlation:
+    enabled: true
+    correlation_window_seconds: 60
+    min_confidence_for_alert: 0.75
+
   ram_dump:
     enabled: true
     interval_seconds: 300  # 5 minutes

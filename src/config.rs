@@ -43,6 +43,14 @@ pub struct MonitoringConfig {
     pub bam: BamConfig,
     pub process: ProcessConfig,
     pub audio: AudioConfig,
+    pub browser: BrowserConfig,
+    pub file_system: FileSystemConfig,
+    pub network: NetworkConfig,
+    pub output_analysis: OutputAnalysisConfig,
+    pub screensharing: ScreenSharingConfig,
+    pub syscall: SyscallConfig,
+    pub user_activity: UserActivityConfig,
+    pub correlation: CorrelationConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +74,71 @@ pub struct AudioConfig {
     pub enabled: bool,
     pub check_interval_seconds: u64,
     pub pulse_audio_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserConfig {
+    pub enabled: bool,
+    pub suspicious_keywords: Vec<String>,
+    pub extension_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileSystemConfig {
+    pub enabled: bool,
+    pub suspicious_extensions: Vec<String>,
+    pub ai_model_paths: Vec<String>,
+    pub monitoring_paths: Vec<String>,
+    pub large_file_threshold_mb: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkConfig {
+    pub enabled: bool,
+    pub suspicious_llm_domains: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputAnalysisConfig {
+    pub enabled: bool,
+    pub perplexity_threshold: f64,
+    pub burstiness_threshold: f64,
+    pub keyword_threshold: f64,
+    pub suspicious_phrases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScreenSharingConfig {
+    pub enabled: bool,
+    pub known_screen_apps: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyscallConfig {
+    pub enabled: bool,
+    pub ai_patterns: Vec<SyscallPatternConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyscallPatternConfig {
+    pub name: String,
+    pub syscalls: Vec<String>,
+    pub confidence: f64,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserActivityConfig {
+    pub enabled: bool,
+    pub suspicious_clipboard_content: Vec<String>,
+    pub suspicious_commands: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrelationConfig {
+    pub enabled: bool,
+    pub correlation_window_seconds: u64,
+    pub min_confidence_for_alert: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,6 +319,138 @@ impl Default for AppConfig {
                     enabled: true,
                     check_interval_seconds: 10,
                     pulse_audio_timeout_ms: 5000,
+                },
+                browser: BrowserConfig {
+                    enabled: true,
+                    suspicious_keywords: vec![
+                        "chatgpt".to_string(), "copilot".to_string(), "claude".to_string(),
+                        "bard".to_string(), "openai".to_string(), "gpt".to_string(),
+                        "anthropic".to_string(), "llm".to_string(),
+                    ],
+                    extension_paths: vec![
+                        "~/.config/google-chrome/Default/Extensions".to_string(),
+                        "~/.config/chromium/Default/Extensions".to_string(),
+                        "~/.mozilla/firefox/*.default-release/extensions".to_string(),
+                        "~/.mozilla/firefox/*.default/extensions".to_string(),
+                        "~/.config/BraveSoftware/Brave-Browser/Default/Extensions".to_string(),
+                        "~/.config/brave/Extensions".to_string(),
+                        "~/.local/share/brave/Brave-Browser/Default/Extensions".to_string(),
+                        "~/snap/brave/current/.config/BraveSoftware/Brave-Browser/Default/Extensions".to_string(),
+                    ],
+                },
+                file_system: FileSystemConfig {
+                    enabled: true,
+                    suspicious_extensions: vec![
+                        ".gguf".to_string(), ".bin".to_string(), ".pt".to_string(),
+                        ".pth".to_string(), ".safetensors".to_string(), ".pkl".to_string(),
+                        ".h5".to_string(), ".onnx".to_string(), ".tflite".to_string(),
+                        ".pb".to_string(), ".model".to_string(), ".weights".to_string(),
+                    ],
+                    ai_model_paths: vec![
+                        "~/.cache/huggingface".to_string(), "~/.ollama".to_string(),
+                        "~/llamacpp".to_string(), "~/.cache/torch".to_string(),
+                        "~/.transformers".to_string(), "~/.local/share/oobabooga".to_string(),
+                        "~/text-generation-webui".to_string(), "~/.cache/gpt4all".to_string(),
+                    ],
+                    monitoring_paths: vec![
+                        "/tmp".to_string(), "~/Downloads".to_string(), "~/Documents".to_string(),
+                        "~/.local/share".to_string(), "~/.cache".to_string(), "/var/tmp".to_string(),
+                    ],
+                    large_file_threshold_mb: 100,
+                },
+                network: NetworkConfig {
+                    enabled: true,
+                    suspicious_llm_domains: vec![
+                        "openai.com".to_string(), "anthropic.com".to_string(),
+                        "perplexity.ai".to_string(), "cohere.ai".to_string(),
+                        "huggingface.co".to_string(), "deepmind.com".to_string(),
+                        "nvidia.com".to_string(), "replicate.com".to_string(),
+                        "ai.google.com".to_string(), "aws.amazon.com".to_string(),
+                        "azure.microsoft.com".to_string(), "cloud.google.com".to_string(),
+                    ],
+                },
+                output_analysis: OutputAnalysisConfig {
+                    enabled: true,
+                    perplexity_threshold: 0.7,
+                    burstiness_threshold: 0.3,
+                    keyword_threshold: 0.15,
+                    suspicious_phrases: vec![
+                        "as an AI".to_string(), "language model".to_string(),
+                        "training data".to_string(), "knowledge cutoff".to_string(),
+                        "I don't have personal".to_string(), "I cannot browse".to_string(),
+                        "I cannot access".to_string(), "my last update".to_string(),
+                        "based on my training".to_string(),
+                    ],
+                },
+                screensharing: ScreenSharingConfig {
+                    enabled: true,
+                    known_screen_apps: vec![
+                        "obs".to_string(), "obs-studio".to_string(), "ffmpeg".to_string(),
+                        "wf-recorder".to_string(), "gstreamer".to_string(), "cheese".to_string(),
+                        "guvcview".to_string(), "kazam".to_string(), "recordmydesktop".to_string(),
+                        "simplescreenrecorder".to_string(), "zoom".to_string(), "skype".to_string(),
+                        "teams".to_string(), "discord".to_string(), "slack".to_string(),
+                        "google-chrome".to_string(), "firefox".to_string(), "chromium".to_string(),
+                        "x11vnc".to_string(), "vino".to_string(), "remmina".to_string(),
+                        "xrdp".to_string(), "teamviewer".to_string(), "anydesk".to_string(),
+                    ],
+                },
+                syscall: SyscallConfig {
+                    enabled: true,
+                    ai_patterns: vec![
+                        SyscallPatternConfig {
+                            name: "GPU_Computing".to_string(),
+                            syscalls: vec!["openat".to_string(), "ioctl".to_string(), "mmap".to_string(), "write".to_string(), "read".to_string()],
+                            confidence: 0.7,
+                            description: "Pattern indicating GPU computation usage".to_string(),
+                        },
+                        SyscallPatternConfig {
+                            name: "AI_Model_Loading".to_string(),
+                            syscalls: vec!["openat".to_string(), "fstat".to_string(), "mmap".to_string(), "madvise".to_string(), "brk".to_string()],
+                            confidence: 0.8,
+                            description: "Pattern for loading large AI model files".to_string(),
+                        },
+                        SyscallPatternConfig {
+                            name: "Network_AI_API".to_string(),
+                            syscalls: vec!["socket".to_string(), "connect".to_string(), "sendto".to_string(), "recvfrom".to_string(), "write".to_string(), "read".to_string()],
+                            confidence: 0.6,
+                            description: "Pattern for AI API communication".to_string(),
+                        },
+                        SyscallPatternConfig {
+                            name: "Large_Memory_Operations".to_string(),
+                            syscalls: vec!["mmap".to_string(), "munmap".to_string(), "mprotect".to_string(), "madvise".to_string(), "brk".to_string()],
+                            confidence: 0.5,
+                            description: "Pattern for large memory operations typical of AI workloads".to_string(),
+                        },
+                        SyscallPatternConfig {
+                            name: "Python_AI_Execution".to_string(),
+                            syscalls: vec!["execve".to_string(), "openat".to_string(), "stat".to_string(), "access".to_string(), "write".to_string()],
+                            confidence: 0.7,
+                            description: "Pattern for Python-based AI tool execution".to_string(),
+                        },
+                    ],
+                },
+                user_activity: UserActivityConfig {
+                    enabled: true,
+                    suspicious_clipboard_content: vec![
+                        "api_key".to_string(), "openai".to_string(), "anthropic".to_string(),
+                        "chatgpt".to_string(), "claude".to_string(), "gpt-".to_string(),
+                        "sk-".to_string(), "Bearer ".to_string(), "Authorization:".to_string(),
+                        "prompt:".to_string(), "system:".to_string(), "assistant:".to_string(),
+                        "human:".to_string(),
+                    ],
+                    suspicious_commands: vec![
+                        "pip install openai".to_string(), "pip install anthropic".to_string(),
+                        "pip install transformers".to_string(), "pip install torch".to_string(),
+                        "git clone".to_string(), "curl -X POST".to_string(), "wget".to_string(),
+                        "ollama".to_string(), "llamacpp".to_string(), "gpt4all".to_string(),
+                        "conda install".to_string(),
+                    ],
+                },
+                correlation: CorrelationConfig {
+                    enabled: true,
+                    correlation_window_seconds: 60,
+                    min_confidence_for_alert: 0.75,
                 },
             },
             alerts: AlertConfig {
