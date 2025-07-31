@@ -8,3 +8,4 @@ pub mod fs_monitor;
 pub mod syscall_monitor;
 pub mod user_activity;
 pub mod screensharing;
+pub mod coordinator;
