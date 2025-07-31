@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::Arc;
+use tokio::sync::RwLock; // Added RwLock
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SessionLog {
@@ -76,8 +77,10 @@ pub struct FileLogger {
 }
 
 impl FileLogger {
-    pub fn new(_config: Arc<AppConfig>) -> Result<Self, std::io::Error> {
-        let logs_dir = "logs".to_string();
+    pub async fn new(config: Arc<RwLock<AppConfig>>) -> Result<Self, std::io::Error> { // Changed signature to async and RwLock
+        let config_guard = config.read().await; // Acquire read lock
+        let logs_dir = config_guard.storage.logs_dir.clone(); // Get logs_dir from config
+        
         fs::create_dir_all(&logs_dir)?;
         
         // Create subdirectories
@@ -311,20 +314,21 @@ mod tests {
     // use std::io::Read; // Removed unused import
     // use chrono::Duration; // Removed unused import
     // Helper function to create a dummy config for tests
-    fn create_test_config() -> AppConfig {
-        AppConfig::default()
-    }
-
-    #[test]
-    fn test_file_logger_new() {
+    async fn create_test_config_arc() -> Arc<RwLock<AppConfig>> {
         let temp_dir = tempdir().unwrap();
         let logs_dir_path = temp_dir.path().join("logs");
         
-        // Mock AppConfig to use the temporary directory
-        let mut config = create_test_config();
+        let mut config = AppConfig::default();
         config.storage.logs_dir = logs_dir_path.to_str().unwrap().to_string();
+        Arc::new(RwLock::new(config))
+    }
 
-        let logger = FileLogger::new(Arc::new(config)).unwrap();
+    #[tokio::test] // Use tokio::test for async test functions
+    async fn test_file_logger_new() {
+        let config_arc = create_test_config_arc().await;
+        let logs_dir_path = config_arc.read().await.storage.logs_dir.clone();
+
+        let logger = FileLogger::new(config_arc.clone()).await.unwrap();
         
         assert!(fs::metadata(&logger.logs_dir).unwrap().is_dir());
         assert!(fs::metadata(format!("{}/sessions", logger.logs_dir)).unwrap().is_dir());

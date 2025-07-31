@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tracing::{error, info, warn};
+use crate::config::NetworkConfig;
 
 // A simple DNS packet structure for parsing
 struct DnsPacket<'a> {
@@ -85,20 +86,26 @@ impl<'a> DnsPacket<'a> {
 }
 
 pub struct NetworkMonitor {
-    // Add fields for network monitoring here
+    config: NetworkConfig,
     stop_signal: Arc<AtomicBool>,
     detected_domains: Arc<Mutex<HashSet<String>>>,
 }
 
 impl NetworkMonitor {
-    pub fn new() -> Self {
+    pub fn new(config: NetworkConfig) -> Self {
         NetworkMonitor {
+            config,
             stop_signal: Arc::new(AtomicBool::new(false)),
             detected_domains: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
     pub fn start_monitoring(&self) {
+        if !self.config.enabled {
+            info!("Network monitoring is disabled in configuration.");
+            return;
+        }
+
         info!("Starting network monitoring...");
         let interfaces = datalink::interfaces();
         let default_interface = interfaces
@@ -117,23 +124,7 @@ impl NetworkMonitor {
 
         let stop_signal = self.stop_signal.clone();
         let detected_domains = self.detected_domains.clone();
-        let suspicious_llm_domains: HashSet<String> = [
-            "openai.com",
-            "anthropic.com",
-            "perplexity.ai",
-            "cohere.ai",
-            "huggingface.co",
-            "deepmind.com",
-            "nvidia.com",
-            "replicate.com",
-            "ai.google.com",
-            "aws.amazon.com", // AWS AI/ML services
-            "azure.microsoft.com", // Azure AI/ML services
-            "cloud.google.com", // Google Cloud AI/ML services
-        ]
-        .iter()
-        .map(|&s| s.to_string())
-        .collect();
+        let suspicious_llm_domains = self.config.suspicious_llm_domains.iter().cloned().collect::<HashSet<String>>();
 
         thread::spawn(move || {
             while !stop_signal.load(Ordering::Relaxed) {
@@ -195,7 +186,8 @@ mod tests {
 
     #[test]
     fn test_network_monitor_new() {
-        let monitor = NetworkMonitor::new();
+        let config = NetworkConfig { enabled: true, suspicious_llm_domains: vec![] };
+        let monitor = NetworkMonitor::new(config);
         assert!(!monitor.stop_signal.load(Ordering::Relaxed));
         assert!(monitor.detected_domains.lock().unwrap().is_empty());
     }
@@ -207,7 +199,8 @@ mod tests {
     #[test]
     #[ignore = "Requires root privileges and real network traffic"]
     fn test_network_monitor_start_and_stop() {
-        let monitor = NetworkMonitor::new();
+        let config = NetworkConfig { enabled: true, suspicious_llm_domains: vec![] };
+        let monitor = NetworkMonitor::new(config);
         monitor.start_monitoring();
         thread::sleep(Duration::from_secs(2)); // Let it monitor for a bit
         monitor.stop_monitoring();
@@ -220,7 +213,8 @@ mod tests {
 
     #[test]
     fn test_get_detected_llm_domains() {
-        let monitor = NetworkMonitor::new();
+        let config = NetworkConfig { enabled: true, suspicious_llm_domains: vec![] };
+        let monitor = NetworkMonitor::new(config);
         {
             let mut domains = monitor.detected_domains.lock().unwrap();
             domains.insert("test.openai.com".to_string());

@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use tracing::{error, info};
 use cluelyguard::config::AppConfig;
-// use cluelyguard::logger::RamDumpLog; // Removed as no longer directly used
+use tokio::sync::RwLock; // Added RwLock
 use std::process::Command;
 
 #[derive(Parser)]
@@ -116,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Creating RAM dump for session: {:?} for student: {}", session_id, student_code);
             
             // Load config
-            let config = Arc::new(AppConfig::load(None)?);
+            let config = Arc::new(RwLock::new(AppConfig::load(None)?)); // Wrap in Arc<RwLock>
             
             // Create session ID if not provided
             let session_id = session_id.clone().unwrap_or_else(|| {
@@ -126,7 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             // Create RAM dump
             // Initialize file logger
-            let file_logger = Arc::new(cluelyguard::logger::FileLogger::new(config.clone())?);
+            let file_logger = Arc::new(cluelyguard::logger::FileLogger::new(config.clone()).await?); // Pass Arc<RwLock> and await
 
             match cluelyguard::logger::FileLogger::create_ram_dump(&session_id, student_code) {
                 Ok(dump) => {

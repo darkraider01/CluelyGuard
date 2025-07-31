@@ -6,8 +6,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use chrono::Utc;
 use serde_json::to_string;
-
-const CORRELATION_WINDOW_SECONDS: u64 = 60; // Events within this window are considered for correlation
+use crate::config::CorrelationConfig;
 
 #[derive(Debug, Clone)]
 pub struct CorrelatedEvent {
@@ -20,19 +19,23 @@ pub struct CorrelatedEvent {
 }
 
 pub struct CorrelationEngine {
+    config: CorrelationConfig,
     event_buffer: Arc<Mutex<VecDeque<GenericMonitorEvent>>>,
-    min_confidence_for_alert: f64,
 }
 
 impl CorrelationEngine {
-    pub fn new() -> Self {
+    pub fn new(config: CorrelationConfig) -> Self {
         CorrelationEngine {
+            config,
             event_buffer: Arc::new(Mutex::new(VecDeque::new())),
-            min_confidence_for_alert: 0.75, // Default threshold
         }
     }
 
     pub async fn process_event(&self, event: MonitorEvent, student_code: &str) -> Option<CorrelatedEvent> {
+        if !self.config.enabled {
+            return None;
+        }
+
         let mut buffer = self.event_buffer.lock().await;
         let now = SystemTime::now();
 
@@ -45,7 +48,7 @@ impl CorrelationEngine {
         // Clean up old events
         buffer.retain(|e| {
             now.duration_since(e.timestamp)
-                .unwrap_or(Duration::from_secs(0)) < Duration::from_secs(CORRELATION_WINDOW_SECONDS)
+                .unwrap_or(Duration::from_secs(0)) < Duration::from_secs(self.config.correlation_window_seconds)
         });
 
         // Apply correlation rules
@@ -91,14 +94,17 @@ impl CorrelationEngine {
             });
 
             if recent_process_suspicion {
-                return Some(CorrelatedEvent {
-                    event_type: "AI_Usage_High_Confidence".to_string(),
-                    timestamp: SystemTime::now(),
-                    student_code: new_event.student_code.clone(),
-                    confidence: 0.9,
-                    description: "High confidence AI tool usage detected (process + output)".to_string(),
-                    correlated_events: buffer.iter().cloned().collect(),
-                });
+                let confidence = (0.9 + self.config.min_confidence_for_alert) / 2.0; // Example: blend with configured min confidence
+                if confidence >= self.config.min_confidence_for_alert {
+                    return Some(CorrelatedEvent {
+                        event_type: "AI_Usage_High_Confidence".to_string(),
+                        timestamp: SystemTime::now(),
+                        student_code: new_event.student_code.clone(),
+                        confidence,
+                        description: "High confidence AI tool usage detected (process + output)".to_string(),
+                        correlated_events: buffer.iter().cloned().collect(),
+                    });
+                }
             }
         }
 
@@ -108,14 +114,17 @@ impl CorrelationEngine {
         }).count();
 
         if suspicious_events_count >= 3 {
-            return Some(CorrelatedEvent {
-                event_type: "Multiple_Suspicious_Activities".to_string(),
-                timestamp: SystemTime::now(),
-                student_code: new_event.student_code.clone(),
-                confidence: 0.8,
-                description: "Multiple distinct suspicious activities detected in a short period.".to_string(),
-                correlated_events: buffer.iter().cloned().collect(),
-            });
+            let confidence = (0.8 + self.config.min_confidence_for_alert) / 2.0;
+            if confidence >= self.config.min_confidence_for_alert {
+                return Some(CorrelatedEvent {
+                    event_type: "Multiple_Suspicious_Activities".to_string(),
+                    timestamp: SystemTime::now(),
+                    student_code: new_event.student_code.clone(),
+                    confidence,
+                    description: "Multiple distinct suspicious activities detected in a short period.".to_string(),
+                    correlated_events: buffer.iter().cloned().collect(),
+                });
+            }
         }
 
         // Rule 3: Suspicious network activity followed by suspicious file system activity
@@ -126,14 +135,17 @@ impl CorrelationEngine {
             });
 
             if recent_network_suspicion {
-                return Some(CorrelatedEvent {
-                    event_type: "Data_Exfiltration_Attempt".to_string(),
-                    timestamp: SystemTime::now(),
-                    student_code: new_event.student_code.clone(),
-                    confidence: 0.95,
-                    description: "Suspicious network activity followed by suspicious file system activity (potential data exfiltration).".to_string(),
-                    correlated_events: buffer.iter().cloned().collect(),
-                });
+                let confidence = (0.95 + self.config.min_confidence_for_alert) / 2.0;
+                if confidence >= self.config.min_confidence_for_alert {
+                    return Some(CorrelatedEvent {
+                        event_type: "Data_Exfiltration_Attempt".to_string(),
+                        timestamp: SystemTime::now(),
+                        student_code: new_event.student_code.clone(),
+                        confidence,
+                        description: "Suspicious network activity followed by suspicious file system activity (potential data exfiltration).".to_string(),
+                        correlated_events: buffer.iter().cloned().collect(),
+                    });
+                }
             }
         }
 

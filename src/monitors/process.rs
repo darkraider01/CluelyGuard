@@ -621,6 +621,47 @@ mod tests {
                     check_interval_seconds: 10,
                     pulse_audio_timeout_ms: 1000,
                 },
+                browser: crate::config::BrowserConfig {
+                    enabled: true,
+                    suspicious_keywords: vec![],
+                    extension_paths: vec![],
+                },
+                file_system: crate::config::FileSystemConfig {
+                    enabled: true,
+                    suspicious_extensions: vec![],
+                    ai_model_paths: vec![],
+                    monitoring_paths: vec![],
+                    large_file_threshold_mb: 0,
+                },
+                network: crate::config::NetworkConfig {
+                    enabled: true,
+                    suspicious_llm_domains: vec![],
+                },
+                output_analysis: crate::config::OutputAnalysisConfig {
+                    enabled: true,
+                    perplexity_threshold: 0.0,
+                    burstiness_threshold: 0.0,
+                    keyword_threshold: 0.0,
+                    suspicious_phrases: vec![],
+                },
+                screensharing: crate::config::ScreenSharingConfig {
+                    enabled: true,
+                    known_screen_apps: vec![],
+                },
+                syscall: crate::config::SyscallConfig {
+                    enabled: true,
+                    ai_patterns: vec![],
+                },
+                user_activity: crate::config::UserActivityConfig {
+                    enabled: true,
+                    suspicious_clipboard_content: vec![],
+                    suspicious_commands: vec![],
+                },
+                correlation: crate::config::CorrelationConfig {
+                    enabled: true,
+                    correlation_window_seconds: 0,
+                    min_confidence_for_alert: 0.0,
+                },
             },
             alerts: crate::config::AlertConfig {
                 enabled: false,

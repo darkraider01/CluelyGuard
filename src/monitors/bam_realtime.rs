@@ -10,6 +10,7 @@ use thiserror::Error;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+use tokio::sync::RwLock; // Added RwLock
 
 #[derive(Error, Debug)]
 pub enum BamError {
@@ -27,7 +28,7 @@ pub type BamResult<T> = Result<T, BamError>;
 
 #[derive(Debug, Clone)]
 pub struct BamMonitor {
-    config: Arc<AppConfig>,
+    config: Arc<RwLock<AppConfig>>, // Changed to Arc<RwLock<AppConfig>>
     file_logger: Arc<FileLogger>,
     _ram_dumper: Arc<RamDumpLog>,
     session_id: String,
@@ -55,7 +56,7 @@ pub struct BamAlert {
 
 impl BamMonitor {
     pub fn new(
-        config: Arc<AppConfig>,
+        config: Arc<RwLock<AppConfig>>, // Changed to Arc<RwLock<AppConfig>>
         file_logger: Arc<FileLogger>,
         ram_dumper: Arc<RamDumpLog>,
         session_id: String,
@@ -72,7 +73,11 @@ impl BamMonitor {
     pub async fn start_monitoring(&self) -> BamResult<()> {
         info!("Starting real-time BAM monitoring for session: {}", self.session_id);
         
-        let check_interval = Duration::from_secs(self.config.monitoring.bam.check_interval_seconds);
+        let config_guard = self.config.read().await; // Acquire read lock
+        let check_interval = Duration::from_secs(config_guard.monitoring.bam.check_interval_seconds);
+        let bam_anomaly_score_threshold = config_guard.alerts.thresholds.bam_anomaly_score;
+        drop(config_guard); // Release lock
+        
         let mut last_check = Instant::now();
         
         loop {
@@ -88,7 +93,7 @@ impl BamMonitor {
                         debug!("BAM check completed: AI detected = {}", result.ai_detected);
                         
                         // Check if we should trigger an alert
-                        if result.ai_detected && result.confidence >= self.config.alerts.thresholds.bam_anomaly_score {
+                        if result.ai_detected && result.confidence >= bam_anomaly_score_threshold {
                             if let Err(e) = self.create_ai_alert(&result).await {
                                 error!("Failed to create AI alert: {}", e);
                             }
@@ -224,7 +229,7 @@ impl BamMonitor {
 // Background BAM monitoring service
 #[derive(Debug)]
 pub struct BamMonitoringService {
-    config: Arc<AppConfig>,
+    config: Arc<RwLock<AppConfig>>, // Changed to Arc<RwLock<AppConfig>>
     file_logger: Arc<FileLogger>,
     ram_dumper: Arc<RamDumpLog>,
     monitors: std::collections::HashMap<String, BamMonitor>,
@@ -232,7 +237,7 @@ pub struct BamMonitoringService {
 
 impl BamMonitoringService {
     pub fn new(
-        config: Arc<AppConfig>,
+        config: Arc<RwLock<AppConfig>>, // Changed to Arc<RwLock<AppConfig>>
         file_logger: Arc<FileLogger>,
         ram_dumper: Arc<RamDumpLog>,
     ) -> Self {
