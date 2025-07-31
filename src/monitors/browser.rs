@@ -39,7 +39,7 @@ const EXTENSION_PATHS: &[&str] = &[
 ];
 
 /// Structure to represent a detected suspicious extension.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SuspiciousExtension {
     pub browser: String,
     pub name: String,

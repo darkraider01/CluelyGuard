@@ -26,14 +26,14 @@ pub enum ActivityType {
     FileAccess,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KeystrokeEvent {
     pub timestamp: SystemTime,
     pub is_typed: bool, // true for typed, false for pasted
     pub text_length: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CommandEvent {
     pub timestamp: SystemTime,
     pub command: String,
@@ -41,7 +41,7 @@ pub struct CommandEvent {
     pub working_directory: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct TypingAnalysis {
     pub typing_speed: f64,      // characters per minute
     pub paste_ratio: f64,        // ratio of pasted vs typed content
