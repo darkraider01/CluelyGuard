@@ -1,172 +1,79 @@
-use clap::{Parser, Subcommand};
+//! CluelyGuard - Advanced Anti-LLM Detection System
+//! 
+//! A comprehensive GUI application for detecting AI usage and preventing 
+//! unauthorized assistance during exams, assessments, and secure environments.
+
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use anyhow::Result;
+use eframe::egui;
 use std::sync::Arc;
-use tracing::{error, info};
-use cluelyguard::config::AppConfig;
-use tokio::sync::RwLock; // Added RwLock
-use std::process::Command;
+use tokio::sync::{mpsc, RwLock};
+use tracing::info;
+use crate::detection::engine::DetectionEngine;
 
-#[derive(Parser)]
-#[command(name = "cluelyguard")]
-#[command(about = "Industrial-grade Linux Anti-LLM Proctoring System")]
-#[command(version = "0.1.0")]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
+mod app;
+mod config;
+mod detection;
+mod gui;
+mod logging;
+mod utils;
 
-#[derive(Subcommand)]
-enum Commands {
-    /// Start the CluelyGuard daemon
-    Start {
-        /// Configuration file path
-        #[arg(short, long, default_value = "config/default.yaml")]
-        config: String,
-        /// Unique student code for the session
-        #[arg(short, long)]
-        student_code: String,
-    },
-    /// Show system status
-    Status,
-    /// Train the BAM model
-    Train {
-        /// Dataset directory
-        #[arg(short, long, default_value = "bam/dataset")]
-        dataset: String,
-    },
-    /// Collect typing samples for training
-    Collect {
-        /// Output file
-        #[arg(short, long, default_value = "bam/dataset/new_sample.json")]
-        output: String,
-        /// Sample duration in seconds
-        #[arg(short, long, default_value = "60")]
-        duration: u64,
-    },
-    /// Generate a report
-    Report {
-        /// Session ID
-        #[arg(short, long)]
-        session_id: Option<String>,
-    },
-    /// Create a RAM dump for analysis
-    RamDump {
-        /// Session ID (optional)
-        #[arg(short, long)]
-        session_id: Option<String>,
-        /// Output directory
-        #[arg(short, long, default_value = "logs/ram_dumps")]
-        output_dir: String,
-        /// Unique student code for the session
-        #[arg(short, long)]
-        student_code: String,
-    },
-}
+use app::CluelyGuardApp;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter("cluelyguard=info")
-        .init();
+    logging::init()?;
+    info!("Starting CluelyGuard v{}", env!("CARGO_PKG_VERSION"));
 
-    info!("CluelyGuard Anti-LLM Proctoring System v0.1.0");
+    // Load configuration
+    let config = config::Config::load().await?;
 
-    let cli = Cli::parse();
+    // Create an MPSC channel for detection events
+    let (event_tx, event_rx) = mpsc::channel(100); // Buffer size of 100
 
-    match &cli.command {
-        Some(Commands::Start { config, student_code }) => {
-            info!("Starting CluelyGuard daemon with config: {} for student: {}", config, student_code);
+    // Initialize detection engine
+    let detection_engine = Arc::new(RwLock::new(
+        DetectionEngine::new(config.clone(), event_tx.clone()).await?
+    ));
 
-            let daemon_path = std::env::current_exe()?
-                .parent()
-                .ok_or("Could not get parent directory")?
-                .join("cluelyguard-daemon");
+    // Setup native options for the GUI
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1200.0, 800.0])
+            .with_min_inner_size([800.0, 600.0])
+            .with_icon(load_icon())
+            .with_title("CluelyGuard - Anti-LLM Detection System"),
+        centered: true,
+        follow_system_theme: false,
+        default_theme: eframe::Theme::Dark,
+        ..Default::default()
+    };
 
-            info!("Launching daemon from: {:?}", daemon_path);
+    // Create and run the application
+    let app = CluelyGuardApp::new(config, detection_engine, event_rx).await?;
 
-            let output = Command::new(daemon_path)
-                .arg("--config").arg(config)
-                .arg("--student-code").arg(student_code)
-                .spawn()?;
 
-            info!("Daemon process spawned with PID: {:?}", output.id());
-            info!("Daemon started successfully");
-        }
-        Some(Commands::Status) => {
-            info!("Checking system status...");
-            // TODO: Implement status check
-            println!("✅ System is running");
-        }
-        Some(Commands::Train { dataset }) => {
-            info!("Training BAM model with dataset: {}", dataset);
-            // TODO: Implement model training
-            info!("Model training completed");
-        }
-        Some(Commands::Collect { output, duration }) => {
-            info!("Collecting typing samples for {} seconds to {}", duration, output);
-            // TODO: Implement sample collection
-            info!("Sample collection completed");
-        }
-        Some(Commands::Report { session_id }) => {
-            info!("Generating report for session: {:?}", session_id);
-            // TODO: Implement report generation
-            info!("Report generated successfully");
-        }
-        Some(Commands::RamDump { session_id, output_dir: _, student_code }) => {
-            info!("Creating RAM dump for session: {:?} for student: {}", session_id, student_code);
-            
-            // Load config
-            let config = Arc::new(RwLock::new(AppConfig::load(None)?)); // Wrap in Arc<RwLock>
-            
-            // Create session ID if not provided
-            let session_id = session_id.clone().unwrap_or_else(|| {
-                use uuid::Uuid;
-                Uuid::new_v4().to_string()
-            });
-            
-            // Create RAM dump
-            // Initialize file logger
-            let file_logger = Arc::new(cluelyguard::logger::FileLogger::new(config.clone()).await?); // Pass Arc<RwLock> and await
-
-            match cluelyguard::logger::FileLogger::create_ram_dump(&session_id, student_code) {
-                Ok(dump) => {
-                    info!("RAM dump created successfully:");
-                    println!("📊 Memory Usage: {:.2} MB", dump.memory_usage_mb);
-                    println!("🔍 Suspicious Processes: {}", dump.suspicious_processes.len());
-                    println!("🌐 Network Connections: {}", dump.network_connections.len());
-                    println!("📁 File Handles: {}", dump.file_handles.len());
-                    println!("🆔 Dump ID: {}", dump.id);
-                    println!("📅 Timestamp: {}", dump.timestamp);
-                    
-                    // Save to file
-                    if let Err(e) = file_logger.log_ram_dump(&dump) {
-                        error!("Failed to save RAM dump: {}", e);
-                    } else {
-                        println!("💾 RAM dump saved to logs/ram_dumps/dump_{}.json", dump.id);
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to create RAM dump: {}", e);
-                    return Err(e);
-                }
-            }
-        }
-        None => {
-            info!("No command specified, showing help");
-            println!("CluelyGuard Anti-LLM Proctoring System");
-            println!("Use --help for more information");
-        }
-    }
-
-    Ok(())
+    eframe::run_native(
+        "CluelyGuard",
+        options,
+        Box::new(|_cc| Ok(Box::new(app))),
+    ).map_err(|e| anyhow::anyhow!("Failed to run GUI: {}", e))
 }
 
-#[cfg(test)]
-mod tests {
-    // CLI command tests are currently skipped due to complexity in mocking global statics and external commands.
-    // Comprehensive testing of CLI commands would require:
-    // - Mocking `std::process::Command` to control spawned processes.
-    // - Capturing `stdout` and `stderr` to verify output.
-    // - Simulating different command-line arguments and their effects.
-    // For now, relying on higher-level integration tests for CLI command functionality.
+fn load_icon() -> egui::IconData {
+    // Load application icon from embedded bytes or file
+    let icon_bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/icon.png"));
+
+    let image = image::load_from_memory(icon_bytes)
+        .expect("Failed to load icon")
+        .to_rgba8();
+
+    let (width, height) = image.dimensions();
+    egui::IconData {
+        rgba: image.into_raw(),
+        width: width as u32,
+        height: height as u32,
+    }
 }
