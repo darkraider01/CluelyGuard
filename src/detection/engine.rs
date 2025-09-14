@@ -98,7 +98,7 @@ impl DetectionEngine {
 
     pub async fn start_monitoring(&self) -> Result<()> {
         info!("🚀 Starting comprehensive real-time AI detection monitoring...");
-
+        
         let mut monitoring_active = self.monitoring_active.write().await;
         if *monitoring_active {
             warn!("Monitoring already active");
@@ -108,7 +108,7 @@ impl DetectionEngine {
         drop(monitoring_active);
 
         let mut tasks = self.running_tasks.write().await;
-
+        
         // Start Browser Extension Monitor
         if self.is_module_enabled(DetectionModule::BrowserExtensions).await? {
             let task = self.start_browser_extension_monitoring().await?;
@@ -150,21 +150,21 @@ impl DetectionEngine {
 
     pub async fn stop_monitoring(&self) {
         info!("🛑 Stopping all detection monitoring...");
-
+        
         *self.monitoring_active.write().await = false;
-
+        
         let mut tasks = self.running_tasks.write().await;
         for (module, task) in tasks.drain() {
             task.abort();
             info!("Stopped {} monitor", module.name());
         }
-
+        
         info!("All detection monitoring stopped");
     }
 
     pub async fn perform_scan(&self) -> Result<()> {
         info!("🔍 Performing comprehensive AI detection scan...");
-
+        
         let scan_start = Instant::now();
         let mut total_events = 0;
         let mut scan_errors = 0;
@@ -257,14 +257,14 @@ impl DetectionEngine {
         }
 
         let scan_duration = scan_start.elapsed();
-
+        
         // Update statistics
         let mut stats = self.scan_stats.write().await;
         stats.total_scans += 1;
         stats.total_detections += total_events as u64;
         stats.last_scan_duration = scan_duration;
         stats.scan_errors += scan_errors;
-
+        
         // Update average scan duration (simple moving average)
         let alpha = 0.1; // Smoothing factor
         stats.average_scan_duration = Duration::from_nanos(
@@ -290,10 +290,10 @@ impl DetectionEngine {
 
         let task = tokio::spawn(async move {
             info!("Browser extension monitoring thread started");
-
+            
             while *monitoring_active.read().await {
                 let scan_start = Instant::now();
-
+                
                 match monitor.scan() {
                     Ok(events) => {
                         for event in events {
@@ -312,7 +312,7 @@ impl DetectionEngine {
 
                 tokio::time::sleep(scan_interval).await;
             }
-
+            
             info!("Browser extension monitoring thread stopped");
         });
 
@@ -330,10 +330,10 @@ impl DetectionEngine {
 
         let task = tokio::spawn(async move {
             info!("Process monitoring thread started");
-
+            
             while *monitoring_active.read().await {
                 let scan_start = Instant::now();
-
+                
                 match monitor.scan().await {
                     Ok(events) => {
                         for event in events {
@@ -352,7 +352,7 @@ impl DetectionEngine {
 
                 tokio::time::sleep(scan_interval).await;
             }
-
+            
             info!("Process monitoring thread stopped");
         });
 
@@ -370,10 +370,10 @@ impl DetectionEngine {
 
         let task = tokio::spawn(async move {
             info!("Network monitoring thread started");
-
+            
             while *monitoring_active.read().await {
                 let scan_start = Instant::now();
-
+                
                 match monitor.scan().await {
                     Ok(events) => {
                         for event in events {
@@ -392,7 +392,7 @@ impl DetectionEngine {
 
                 tokio::time::sleep(scan_interval).await;
             }
-
+            
             info!("Network monitoring thread stopped");
         });
 
@@ -410,10 +410,10 @@ impl DetectionEngine {
 
         let task = tokio::spawn(async move {
             info!("Screen monitoring thread started");
-
+            
             while *monitoring_active.read().await {
                 let scan_start = Instant::now();
-
+                
                 match monitor.scan().await {
                     Ok(events) => {
                         for event in events {
@@ -432,7 +432,7 @@ impl DetectionEngine {
 
                 tokio::time::sleep(scan_interval).await;
             }
-
+            
             info!("Screen monitoring thread stopped");
         });
 
@@ -450,10 +450,10 @@ impl DetectionEngine {
 
         let task = tokio::spawn(async move {
             info!("Filesystem monitoring thread started");
-
+            
             while *monitoring_active.read().await {
                 let scan_start = Instant::now();
-
+                
                 match monitor.scan().await {
                     Ok(events) => {
                         for event in events {
@@ -472,7 +472,7 @@ impl DetectionEngine {
 
                 tokio::time::sleep(scan_interval).await;
             }
-
+            
             info!("Filesystem monitoring thread stopped");
         });
 

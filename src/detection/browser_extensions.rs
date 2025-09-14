@@ -12,6 +12,7 @@ use crate::detection::types::{
     BrowserExtensionConfig, DetectionConfig,
 };
 
+#[derive(Clone)]
 pub struct BrowserExtensionMonitor {
     config: BrowserExtensionConfig,
     detection_config: DetectionConfig,
@@ -203,7 +204,7 @@ impl BrowserExtensionMonitor {
         let mut paths = Vec::new();
         if let Some(app_data) = dirs::app_data_dir() {
             // Firefox profiles are complex, this is a simplified path
-            if let Some(profiles_dir) = app_data.join(r"Mozilla\Firefox\Profiles").read_dir().ok() {
+            if let Ok(profiles_dir) = app_data.join(r"Mozilla\Firefox\Profiles").read_dir() {
                 for entry in profiles_dir.filter_map(|e| e.ok()) {
                     if entry.file_type().map_or(false, |f| f.is_dir()) {
                         paths.push(entry.path().join("extensions"));
@@ -218,7 +219,7 @@ impl BrowserExtensionMonitor {
     fn get_firefox_extension_paths(&self) -> Vec<PathBuf> {
         let mut paths = Vec::new();
         if let Some(app_data) = dirs::home_dir() {
-            if let Some(profiles_dir) = app_data.join("Library/Application Support/Firefox/Profiles").read_dir().ok() {
+            if let Ok(profiles_dir) = app_data.join("Library/Application Support/Firefox/Profiles").read_dir() {
                 for entry in profiles_dir.filter_map(|e| e.ok()) {
                     if entry.file_type().map_or(false, |f| f.is_dir()) {
                         paths.push(entry.path().join("extensions"));
@@ -233,7 +234,7 @@ impl BrowserExtensionMonitor {
     fn get_firefox_extension_paths(&self) -> Vec<PathBuf> {
         let mut paths = Vec::new();
         if let Some(config_dir) = dirs::config_dir() {
-            if let Some(profiles_dir) = config_dir.join("firefox/Profiles").read_dir().ok() {
+            if let Ok(profiles_dir) = config_dir.join("firefox/Profiles").read_dir() {
                 for entry in profiles_dir.filter_map(|e| e.ok()) {
                     if entry.file_type().map_or(false, |f| f.is_dir()) {
                         paths.push(entry.path().join("extensions"));

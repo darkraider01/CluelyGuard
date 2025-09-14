@@ -1,497 +1,475 @@
-//! Complete Detection Engine with Real-Time Monitoring
+//! Complete Filesystem Monitor with Real-Time Detection
 
 use anyhow::Result;
-use std::collections::HashMap;
+use chrono::Utc;
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::CreateKind, event::ModifyKind};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::{mpsc::Sender, RwLock};
-use tokio::task::JoinHandle;
-use tracing::{error, info, debug, warn};
+use tokio::sync::mpsc;
+use tracing::{debug, error, info, warn};
+use walkdir::WalkDir;
 
-use crate::config::Config;
-use crate::detection::browser_extensions::BrowserExtensionMonitor;
-use crate::detection::filesystem_monitor::FilesystemMonitor;
-use crate::detection::network_monitor::NetworkMonitor;
-use crate::detection::process_monitor::ProcessMonitor;
-use crate::detection::screen_monitor::ScreenMonitor;
-use crate::detection::types::{DetectionEvent, DetectionModule};
+use crate::detection::types::{
+    DetectionEvent, DetectionDetails, DetectionModule, ThreatLevel,
+    FilesystemMonitorConfig,
+};
 
-pub struct DetectionEngine {
-    config: Config,
-    browser_extensions_monitor: BrowserExtensionMonitor,
-    process_monitor: ProcessMonitor,
-    network_monitor: NetworkMonitor,
-    screen_monitor: ScreenMonitor,
-    filesystem_monitor: FilesystemMonitor,
-    event_tx: Sender<DetectionEvent>,
-    running_tasks: Arc<RwLock<HashMap<DetectionModule, JoinHandle<()>>>>,
-    monitoring_active: Arc<RwLock<bool>>,
-    scan_stats: Arc<RwLock<ScanStatistics>>,
+#[derive(Clone)]
+pub struct FilesystemMonitor {
+    config: FilesystemMonitorConfig,
+    ai_file_signatures: HashSet<String>,
+    suspicious_content_patterns: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ScanStatistics {
-    pub total_scans: u64,
-    pub total_detections: u64,
-    pub last_scan_duration: Duration,
-    pub average_scan_duration: Duration,
-    pub detections_per_minute: f64,
-    pub scan_errors: u64,
-}
-
-impl Default for ScanStatistics {
-    fn default() -> Self {
-        Self {
-            total_scans: 0,
-            total_detections: 0,
-            last_scan_duration: Duration::from_millis(0),
-            average_scan_duration: Duration::from_millis(100),
-            detections_per_minute: 0.0,
-            scan_errors: 0,
-        }
-    }
-}
-
-impl DetectionEngine {
-    pub async fn new(config: Config, event_tx: Sender<DetectionEvent>) -> Result<Self> {
-        info!("Initializing Advanced Detection Engine...");
-
-        let detection_config = config.detection.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Detection configuration missing"))?;
-
-        let browser_extensions_monitor = BrowserExtensionMonitor::new(
-            detection_config.browser_extensions.clone(),
-            detection_config.clone(),
-        )?;
-
-        let process_monitor = ProcessMonitor::new(
-            detection_config.process_monitor.clone(),
-        )?;
-
-        let network_monitor = NetworkMonitor::new(
-            detection_config.network_monitor.clone(),
-        )?;
-
-        let screen_monitor = ScreenMonitor::new(
-            detection_config.screen_monitor.clone(),
-        )?;
-
-        let filesystem_monitor = FilesystemMonitor::new(
-            detection_config.filesystem_monitor.clone(),
-        )?;
-
-        info!("All detection modules initialized successfully");
+impl FilesystemMonitor {
+    pub fn new(config: FilesystemMonitorConfig) -> Result<Self> {
+        let ai_file_signatures = Self::build_ai_file_signatures();
+        let suspicious_content_patterns = Self::build_content_patterns();
 
         Ok(Self {
             config,
-            browser_extensions_monitor,
-            process_monitor,
-            network_monitor,
-            screen_monitor,
-            filesystem_monitor,
-            event_tx,
-            running_tasks: Arc::new(RwLock::new(HashMap::new())),
-            monitoring_active: Arc::new(RwLock::new(false)),
-            scan_stats: Arc::new(RwLock::new(ScanStatistics::default())),
+            ai_file_signatures,
+            suspicious_content_patterns,
         })
     }
 
-    pub async fn start_monitoring(&self) -> Result<()> {
-        info!("🚀 Starting comprehensive real-time AI detection monitoring...");
-
-        let mut monitoring_active = self.monitoring_active.write().await;
-        if *monitoring_active {
-            warn!("Monitoring already active");
-            return Ok(());
+    pub async fn scan(&self) -> Result<Vec<DetectionEvent>> {
+        let mut events = Vec::new();
+        
+        debug!("Starting filesystem scan...");
+        
+        for watch_dir in &self.config.watch_directories {
+            let path = Path::new(watch_dir);
+            if !path.exists() {
+                warn!("Watch directory does not exist: {}", watch_dir);
+                continue;
+            }
+            
+            events.extend(self.scan_directory_recursive(path).await?);
         }
-        *monitoring_active = true;
-        drop(monitoring_active);
+        
+        // Scan specific locations for AI-related files
+        if self.config.monitor_downloads {
+            if let Some(downloads_dir) = dirs::download_dir() {
+                events.extend(self.scan_directory_recursive(&downloads_dir).await?);
+            }
+        }
+        
+        if self.config.monitor_temp_files {
+            events.extend(self.scan_temp_directories().await?);
+        }
+        
+        debug!("Filesystem scan completed, found {} suspicious files", events.len());
+        Ok(events)
+    }
 
-        let mut tasks = self.running_tasks.write().await;
+    pub async fn start_watching(&self) -> Result<mpsc::Receiver<DetectionEvent>> {
+        let (tx, rx) = mpsc::channel(1000);
+        let config = self.config.clone();
+        let ai_signatures = self.ai_file_signatures.clone();
+        let content_patterns = self.suspicious_content_patterns.clone();
 
-        // Start Browser Extension Monitor
-        if self.is_module_enabled(DetectionModule::BrowserExtensions).await? {
-            let task = self.start_browser_extension_monitoring().await?;
-            tasks.insert(DetectionModule::BrowserExtensions, task);
-            info!("✅ Browser Extension Monitor started");
+        tokio::spawn(async move {
+            if let Err(e) = Self::watch_filesystem(config, ai_signatures, content_patterns, tx).await {
+                error!("Filesystem watcher failed: {}", e);
+            }
+        });
+
+        Ok(rx)
+    }
+
+    async fn scan_directory_recursive(&self, dir_path: &Path) -> Result<Vec<DetectionEvent>> {
+        let mut events = Vec::new();
+        
+        for entry in WalkDir::new(dir_path)
+            .max_depth(5) // Limit depth to prevent excessive scanning
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_type().is_file() {
+                if let Some(event) = self.analyze_file(entry.path()).await? {
+                    events.push(event);
+                }
+            }
+        }
+        
+        Ok(events)
+    }
+
+    async fn scan_temp_directories(&self) -> Result<Vec<DetectionEvent>> {
+        let mut events = Vec::new();
+        
+        let temp_dirs = vec![
+            std::env::temp_dir(),
+            dirs::cache_dir().unwrap_or_default(),
+        ];
+        
+        for temp_dir in temp_dirs {
+            if temp_dir.exists() {
+                // Only scan recent files in temp directories (last 24 hours)
+                events.extend(self.scan_recent_files(&temp_dir, 86400).await?);
+            }
+        }
+        
+        Ok(events)
+    }
+
+    async fn scan_recent_files(&self, dir: &Path, max_age_seconds: u64) -> Result<Vec<DetectionEvent>> {
+        let mut events = Vec::new();
+        let cutoff_time = std::time::SystemTime::now() - std::time::Duration::from_secs(max_age_seconds);
+        
+        for entry in WalkDir::new(dir)
+            .max_depth(3)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_type().is_file() {
+                if let Ok(metadata) = entry.metadata() {
+                    if let Ok(modified) = metadata.modified() {
+                        if modified > cutoff_time {
+                            if let Some(event) = self.analyze_file(entry.path()).await? {
+                                events.push(event);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(events)
+    }
+
+    async fn analyze_file(&self, file_path: &Path) -> Result<Option<DetectionEvent>> {
+        let file_name = file_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        
+        let mut suspicious_indicators = Vec::new();
+        let mut threat_level = ThreatLevel::Info;
+
+        // Check file extension
+        if let Some(extension) = file_path.extension().and_then(|e| e.to_str()) {
+            let ext_lower = format!(".{}", extension.to_lowercase());
+            if self.config.suspicious_extensions.contains(&ext_lower) {
+                suspicious_indicators.push(format!("Suspicious file extension: {}", ext_lower));
+                threat_level = std::cmp::max(threat_level, ThreatLevel::Medium);
+            }
         }
 
-        // Start Process Monitor
-        if self.is_module_enabled(DetectionModule::ProcessMonitor).await? {
-            let task = self.start_process_monitoring().await?;
-            tasks.insert(DetectionModule::ProcessMonitor, task);
-            info!("✅ Process Monitor started");
+        // Check filename patterns
+        for suspicious_name in &self.config.suspicious_filenames {
+            if file_name.contains(&suspicious_name.to_lowercase()) {
+                suspicious_indicators.push(format!("Suspicious filename pattern: {}", suspicious_name));
+                threat_level = std::cmp::max(threat_level, ThreatLevel::High);
+            }
         }
 
-        // Start Network Monitor
-        if self.is_module_enabled(DetectionModule::NetworkMonitor).await? {
-            let task = self.start_network_monitoring().await?;
-            tasks.insert(DetectionModule::NetworkMonitor, task);
-            info!("✅ Network Monitor started");
+        // Check against AI file signatures
+        for signature in &self.ai_file_signatures {
+            if file_name.contains(signature) {
+                suspicious_indicators.push(format!("AI-related file signature: {}", signature));
+                threat_level = std::cmp::max(threat_level, ThreatLevel::High);
+            }
         }
 
-        // Start Screen Monitor (if enabled)
-        if self.is_module_enabled(DetectionModule::ScreenMonitor).await? {
-            let task = self.start_screen_monitoring().await?;
-            tasks.insert(DetectionModule::ScreenMonitor, task);
-            info!("✅ Screen Monitor started");
+        // Analyze file content for text files
+        if self.is_text_file(file_path) {
+            if let Ok(content_indicators) = self.analyze_file_content(file_path).await {
+                if !content_indicators.is_empty() {
+                    suspicious_indicators.extend(content_indicators);
+                    threat_level = std::cmp::max(threat_level, ThreatLevel::Critical);
+                }
+            }
         }
 
-        // Start Filesystem Monitor
-        if self.is_module_enabled(DetectionModule::FilesystemMonitor).await? {
-            let task = self.start_filesystem_monitoring().await?;
-            tasks.insert(DetectionModule::FilesystemMonitor, task);
-            info!("✅ Filesystem Monitor started");
+        // Check file size for suspicious patterns
+        if let Ok(metadata) = tokio::fs::metadata(file_path).await {
+            let file_size = metadata.len();
+            
+            // Very large text files might be AI conversation logs
+            if file_size > 1024 * 1024 && self.is_text_file(file_path) { // > 1MB
+                suspicious_indicators.push("Large text file (potential AI conversation log)".to_string());
+                threat_level = std::cmp::max(threat_level, ThreatLevel::Medium);
+            }
         }
 
-        info!("🛡️ All enabled detection modules are now running");
+        if !suspicious_indicators.is_empty() {
+            Ok(Some(self.create_filesystem_event(
+                file_path,
+                "detected".to_string(),
+                suspicious_indicators,
+                threat_level,
+            )?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn analyze_file_content(&self, file_path: &Path) -> Result<Vec<String>> {
+        let mut indicators = Vec::new();
+        
+        // Read first 64KB of file for analysis
+        let content = match tokio::fs::read_to_string(file_path).await {
+            Ok(content) => {
+                if content.len() > 65536 {
+                    content.chars().take(65536).collect()
+                } else {
+                    content
+                }
+            }
+            Err(_) => return Ok(indicators), // Not a text file or can't read
+        };
+
+        let content_lower = content.to_lowercase();
+
+        // Check for AI conversation patterns
+        let ai_conversation_patterns = [
+            "as an ai", "i'm an ai", "i am an artificial intelligence",
+            "openai", "chatgpt", "claude", "anthropic", "gemini",
+            "i don't have personal opinions", "i can't browse the internet",
+            "as a language model", "i'm not able to", "i cannot provide",
+            "regenerate response", "stop generating", "continue generating",
+            "```python", "```javascript", "```code", "```sql", // Code blocks
+            "human:", "assistant:", "user:", "ai:", "bot:",
+        ];
+
+        let mut ai_pattern_count = 0;
+        for pattern in &ai_conversation_patterns {
+            if content_lower.contains(pattern) {
+                ai_pattern_count += 1;
+                indicators.push(format!("AI conversation pattern: {}", pattern));
+            }
+        }
+
+        // High density of AI patterns indicates AI-generated content
+        if ai_pattern_count >= 3 {
+            indicators.push(format!("High density of AI patterns ({})", ai_pattern_count));
+        }
+
+        // Check for API keys or tokens
+        let api_key_patterns = [
+            "sk-", "pk-", "api_key", "openai_api_key", "anthropic_api_key",
+            "bearer ", "authorization:", "x-api-key", "client_secret",
+        ];
+
+        for pattern in &api_key_patterns {
+            if content_lower.contains(pattern) {
+                indicators.push(format!("Potential API key/token: {}", pattern));
+            }
+        }
+
+        // Check for suspicious file paths or URLs
+        let suspicious_urls = [
+            "chat.openai.com", "claude.ai", "api.openai.com", "api.anthropic.com",
+            "copilot.github.com", "api.github.com/copilot", "gemini.google.com",
+        ];
+
+        for url in &suspicious_urls {
+            if content_lower.contains(url) {
+                indicators.push(format!("AI service URL: {}", url));
+            }
+        }
+
+        Ok(indicators)
+    }
+
+    fn is_text_file(&self, file_path: &Path) -> bool {
+        if let Some(extension) = file_path.extension().and_then(|e| e.to_str()) {
+            let text_extensions = [
+                "txt", "md", "log", "json", "xml", "csv", "yaml", "yml",
+                "py", "js", "ts", "rs", "go", "cpp", "c", "h", "java",
+                "html", "css", "sql", "sh", "bat", "ps1", "conf", "cfg",
+            ];
+            text_extensions.contains(&extension.to_lowercase().as_str())
+        } else {
+            false
+        }
+    }
+
+    fn build_ai_file_signatures() -> HashSet<String> {
+        let mut signatures = HashSet::new();
+        
+        // AI model files
+        signatures.insert("ggml".to_string());
+        signatures.insert("gguf".to_string());
+        signatures.insert("safetensors".to_string());
+        signatures.insert("bin".to_string());
+        signatures.insert("pth".to_string());
+        signatures.insert("ckpt".to_string());
+        
+        // AI application signatures
+        signatures.insert("chatgpt".to_string());
+        signatures.insert("claude".to_string());
+        signatures.insert("ollama".to_string());
+        signatures.insert("gpt4all".to_string());
+        signatures.insert("koboldai".to_string());
+        signatures.insert("textgen".to_string());
+        signatures.insert("oobabooga".to_string());
+        
+        // AI-related folders/files
+        signatures.insert("models".to_string());
+        signatures.insert("conversation".to_string());
+        signatures.insert("ai_response".to_string());
+        signatures.insert("llm_output".to_string());
+        signatures.insert("ai_generated".to_string());
+        
+        signatures
+    }
+
+    fn build_content_patterns() -> Vec<String> {
+        vec![
+            "I am an AI".to_string(),
+            "as an artificial intelligence".to_string(),
+            "I'm Claude".to_string(),
+            "I'm ChatGPT".to_string(),
+            "OpenAI's language model".to_string(),
+            "Anthropic's AI assistant".to_string(),
+        ]
+    }
+
+    async fn watch_filesystem(
+        config: FilesystemMonitorConfig,
+        ai_signatures: HashSet<String>,
+        content_patterns: Vec<String>,
+        tx: mpsc::Sender<DetectionEvent>,
+    ) -> Result<()> {
+        let (notify_tx, mut notify_rx) = mpsc::channel(1000);
+
+        let mut watcher = RecommendedWatcher::new(
+            move |result: notify::Result<Event>| {
+                if let Ok(event) = result {
+                    let _ = notify_tx.try_send(event);
+                }
+            },
+            Config::default(),
+        )?;
+
+        // Watch configured directories
+        for dir_path in &config.watch_directories {
+            let path = Path::new(dir_path);
+            if path.exists() {
+                if let Err(e) = watcher.watch(path, RecursiveMode::Recursive) {
+                    warn!("Failed to watch directory {}: {}", dir_path, e);
+                } else {
+                    info!("Watching directory: {}", dir_path);
+                }
+            }
+        }
+
+        // Process filesystem events
+        while let Some(event) = notify_rx.recv().await {
+            if let Some(detection_event) = Self::analyze_filesystem_event(&config, &ai_signatures, event).await {
+                let _ = tx.send(detection_event).await;
+            }
+        }
+
         Ok(())
     }
 
-    pub async fn stop_monitoring(&self) {
-        info!("🛑 Stopping all detection monitoring...");
-
-        *self.monitoring_active.write().await = false;
-
-        let mut tasks = self.running_tasks.write().await;
-        for (module, task) in tasks.drain() {
-            task.abort();
-            info!("Stopped {} monitor", module.name());
-        }
-
-        info!("All detection monitoring stopped");
-    }
-
-    pub async fn perform_scan(&self) -> Result<()> {
-        info!("🔍 Performing comprehensive AI detection scan...");
-
-        let scan_start = Instant::now();
-        let mut total_events = 0;
-        let mut scan_errors = 0;
-
-        // Browser Extensions Scan
-        match self.browser_extensions_monitor.scan() {
-            Ok(events) => {
-                total_events += events.len();
-                for event in events {
-                    if let Err(e) = self.event_tx.send(event).await {
-                        error!("Failed to send browser extension event: {}", e);
-                        scan_errors += 1;
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Browser extension scan failed: {}", e);
-                scan_errors += 1;
-            }
-        }
-
-        // Process Monitor Scan
-        match self.process_monitor.scan().await {
-            Ok(events) => {
-                total_events += events.len();
-                for event in events {
-                    if let Err(e) = self.event_tx.send(event).await {
-                        error!("Failed to send process event: {}", e);
-                        scan_errors += 1;
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Process monitor scan failed: {}", e);
-                scan_errors += 1;
-            }
-        }
-
-        // Network Monitor Scan
-        match self.network_monitor.scan().await {
-            Ok(events) => {
-                total_events += events.len();
-                for event in events {
-                    if let Err(e) = self.event_tx.send(event).await {
-                        error!("Failed to send network event: {}", e);
-                        scan_errors += 1;
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Network monitor scan failed: {}", e);
-                scan_errors += 1;
-            }
-        }
-
-        // Screen Monitor Scan (if enabled)
-        if self.is_module_enabled(DetectionModule::ScreenMonitor).await? {
-            match self.screen_monitor.scan().await {
-                Ok(events) => {
-                    total_events += events.len();
-                    for event in events {
-                        if let Err(e) = self.event_tx.send(event).await {
-                            error!("Failed to send screen event: {}", e);
-                            scan_errors += 1;
+    async fn analyze_filesystem_event(
+        config: &FilesystemMonitorConfig,
+        ai_signatures: &HashSet<String>,
+        event: Event,
+    ) -> Option<DetectionEvent> {
+        match event.kind {
+            EventKind::Create(CreateKind::File) | EventKind::Modify(ModifyKind::Data(_)) => {
+                for path in &event.paths {
+                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                        let file_name_lower = file_name.to_lowercase();
+                        
+                        // Quick check for AI-related files
+                        for signature in ai_signatures {
+                            if file_name_lower.contains(signature) {
+                                return Some(DetectionEvent {
+                                    id: uuid::Uuid::new_v4(),
+                                    detection_type: "Real-time File Activity".to_string(),
+                                    module: DetectionModule::FilesystemMonitor,
+                                    threat_level: ThreatLevel::High,
+                                    description: format!("AI-related file activity: {}", file_name),
+                                    details: DetectionDetails::Filesystem {
+                                        file_path: path.to_string_lossy().to_string(),
+                                        operation: format!("{:?}", event.kind),
+                                        file_size: 0, // Will be filled later
+                                        file_hash: None,
+                                        suspicious_content: vec![format!("AI signature: {}", signature)],
+                                    },
+                                    timestamp: Utc::now(),
+                                    source: Some("Real-time Filesystem Monitor".to_string()),
+                                    metadata: HashMap::new(),
+                                });
+                            }
+                        }
+                        
+                        // Check suspicious extensions
+                        if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
+                            let ext_with_dot = format!(".{}", extension.to_lowercase());
+                            if config.suspicious_extensions.contains(&ext_with_dot) {
+                                return Some(DetectionEvent {
+                                    id: uuid::Uuid::new_v4(),
+                                    detection_type: "Suspicious File Extension".to_string(),
+                                    module: DetectionModule::FilesystemMonitor,
+                                    threat_level: ThreatLevel::Medium,
+                                    description: format!("Suspicious file created: {}", file_name),
+                                    details: DetectionDetails::Filesystem {
+                                        file_path: path.to_string_lossy().to_string(),
+                                        operation: format!("{:?}", event.kind),
+                                        file_size: 0,
+                                        file_hash: None,
+                                        suspicious_content: vec![format!("Suspicious extension: {}", ext_with_dot)],
+                                    },
+                                    timestamp: Utc::now(),
+                                    source: Some("Real-time Filesystem Monitor".to_string()),
+                                    metadata: HashMap::new(),
+                                });
+                            }
                         }
                     }
                 }
-                Err(e) => {
-                    error!("Screen monitor scan failed: {}", e);
-                    scan_errors += 1;
-                }
             }
+            _ => {}
         }
+        
+        None
+    }
 
-        // Filesystem Monitor Scan
-        match self.filesystem_monitor.scan().await {
-            Ok(events) => {
-                total_events += events.len();
-                for event in events {
-                    if let Err(e) = self.event_tx.send(event).await {
-                        error!("Failed to send filesystem event: {}", e);
-                        scan_errors += 1;
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Filesystem monitor scan failed: {}", e);
-                scan_errors += 1;
-            }
-        }
+    fn create_filesystem_event(
+        &self,
+        file_path: &Path,
+        operation: String,
+        suspicious_content: Vec<String>,
+        threat_level: ThreatLevel,
+    ) -> Result<DetectionEvent> {
+        let file_size = std::fs::metadata(file_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
 
-        let scan_duration = scan_start.elapsed();
+        Ok(DetectionEvent {
+            id: uuid::Uuid::new_v4(),
+            detection_type: "Filesystem Analysis".to_string(),
+            module: DetectionModule::FilesystemMonitor,
+            threat_level,
+            description: format!("Suspicious file detected: {}", 
+                file_path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown")
+            ),
+            details: DetectionDetails::Filesystem {
+                file_path: file_path.to_string_lossy().to_string(),
+                operation,
+                file_size,
+                file_hash: None, // Could implement SHA256 hashing if needed
+                suspicious_content,
+            },
+            timestamp: Utc::now(),
+            source: Some("Filesystem Monitor".to_string()),
+            metadata: HashMap::new(),
+        })
+    }
 
-        // Update statistics
-        let mut stats = self.scan_stats.write().await;
-        stats.total_scans += 1;
-        stats.total_detections += total_events as u64;
-        stats.last_scan_duration = scan_duration;
-        stats.scan_errors += scan_errors;
-
-        // Update average scan duration (simple moving average)
-        let alpha = 0.1; // Smoothing factor
-        stats.average_scan_duration = Duration::from_nanos(
-            (alpha * scan_duration.as_nanos() as f64 + 
-             (1.0 - alpha) * stats.average_scan_duration.as_nanos() as f64) as u64
-        );
-
-        info!("✅ Scan completed: {} threats detected in {:?} (errors: {})", 
-              total_events, scan_duration, scan_errors);
-
+    pub fn update_config(&mut self, config: FilesystemMonitorConfig) -> Result<()> {
+        self.config = config;
         Ok(())
-    }
-
-    // Individual monitoring task starters
-    async fn start_browser_extension_monitoring(&self) -> Result<JoinHandle<()>> {
-        let monitor = self.browser_extensions_monitor.clone();
-        let event_tx = self.event_tx.clone();
-        let monitoring_active = self.monitoring_active.clone();
-        let scan_interval = Duration::from_millis(
-            self.config.detection.as_ref().unwrap()
-                .browser_extensions.scan_interval_ms
-        );
-
-        let task = tokio::spawn(async move {
-            info!("Browser extension monitoring thread started");
-
-            while *monitoring_active.read().await {
-                let scan_start = Instant::now();
-
-                match monitor.scan() {
-                    Ok(events) => {
-                        for event in events {
-                            if let Err(e) = event_tx.send(event).await {
-                                error!("Failed to send browser extension event: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Browser extension scan error: {}", e);
-                    }
-                }
-
-                let scan_duration = scan_start.elapsed();
-                debug!("Browser extension scan completed in {:?}", scan_duration);
-
-                tokio::time::sleep(scan_interval).await;
-            }
-
-            info!("Browser extension monitoring thread stopped");
-        });
-
-        Ok(task)
-    }
-
-    async fn start_process_monitoring(&self) -> Result<JoinHandle<()>> {
-        let monitor = self.process_monitor.clone();
-        let event_tx = self.event_tx.clone();
-        let monitoring_active = self.monitoring_active.clone();
-        let scan_interval = Duration::from_millis(
-            self.config.detection.as_ref().unwrap()
-                .process_monitor.scan_interval_ms
-        );
-
-        let task = tokio::spawn(async move {
-            info!("Process monitoring thread started");
-
-            while *monitoring_active.read().await {
-                let scan_start = Instant::now();
-
-                match monitor.scan().await {
-                    Ok(events) => {
-                        for event in events {
-                            if let Err(e) = event_tx.send(event).await {
-                                error!("Failed to send process event: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Process monitor scan error: {}", e);
-                    }
-                }
-
-                let scan_duration = scan_start.elapsed();
-                debug!("Process scan completed in {:?}", scan_duration);
-
-                tokio::time::sleep(scan_interval).await;
-            }
-
-            info!("Process monitoring thread stopped");
-        });
-
-        Ok(task)
-    }
-
-    async fn start_network_monitoring(&self) -> Result<JoinHandle<()>> {
-        let monitor = self.network_monitor.clone();
-        let event_tx = self.event_tx.clone();
-        let monitoring_active = self.monitoring_active.clone();
-        let scan_interval = Duration::from_millis(
-            self.config.detection.as_ref().unwrap()
-                .network_monitor.scan_interval_ms
-        );
-
-        let task = tokio::spawn(async move {
-            info!("Network monitoring thread started");
-
-            while *monitoring_active.read().await {
-                let scan_start = Instant::now();
-
-                match monitor.scan().await {
-                    Ok(events) => {
-                        for event in events {
-                            if let Err(e) = event_tx.send(event).await {
-                                error!("Failed to send network event: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Network monitor scan error: {}", e);
-                    }
-                }
-
-                let scan_duration = scan_start.elapsed();
-                debug!("Network scan completed in {:?}", scan_duration);
-
-                tokio::time::sleep(scan_interval).await;
-            }
-
-            info!("Network monitoring thread stopped");
-        });
-
-        Ok(task)
-    }
-
-    async fn start_screen_monitoring(&self) -> Result<JoinHandle<()>> {
-        let monitor = self.screen_monitor.clone();
-        let event_tx = self.event_tx.clone();
-        let monitoring_active = self.monitoring_active.clone();
-        let scan_interval = Duration::from_millis(
-            self.config.detection.as_ref().unwrap()
-                .screen_monitor.capture_interval_ms
-        );
-
-        let task = tokio::spawn(async move {
-            info!("Screen monitoring thread started");
-
-            while *monitoring_active.read().await {
-                let scan_start = Instant::now();
-
-                match monitor.scan().await {
-                    Ok(events) => {
-                        for event in events {
-                            if let Err(e) = event_tx.send(event).await {
-                                error!("Failed to send screen event: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Screen monitor scan error: {}", e);
-                    }
-                }
-
-                let scan_duration = scan_start.elapsed();
-                debug!("Screen scan completed in {:?}", scan_duration);
-
-                tokio::time::sleep(scan_interval).await;
-            }
-
-            info!("Screen monitoring thread stopped");
-        });
-
-        Ok(task)
-    }
-
-    async fn start_filesystem_monitoring(&self) -> Result<JoinHandle<()>> {
-        let monitor = self.filesystem_monitor.clone();
-        let event_tx = self.event_tx.clone();
-        let monitoring_active = self.monitoring_active.clone();
-        let scan_interval = Duration::from_millis(
-            self.config.detection.as_ref().unwrap()
-                .filesystem_monitor.scan_interval_ms
-        );
-
-        let task = tokio::spawn(async move {
-            info!("Filesystem monitoring thread started");
-
-            while *monitoring_active.read().await {
-                let scan_start = Instant::now();
-
-                match monitor.scan().await {
-                    Ok(events) => {
-                        for event in events {
-                            if let Err(e) = event_tx.send(event).await {
-                                error!("Failed to send filesystem event: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Filesystem monitor scan error: {}", e);
-                    }
-                }
-
-                let scan_duration = scan_start.elapsed();
-                debug!("Filesystem scan completed in {:?}", scan_duration);
-
-                tokio::time::sleep(scan_interval).await;
-            }
-
-            info!("Filesystem monitoring thread stopped");
-        });
-
-        Ok(task)
-    }
-
-    async fn is_module_enabled(&self, module: DetectionModule) -> Result<bool> {
-        Ok(self.config.detection.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Detection config missing"))?
-            .enabled_modules.get(&module)
-            .copied()
-            .unwrap_or(false))
-    }
-
-    pub async fn get_statistics(&self) -> ScanStatistics {
-        self.scan_stats.read().await.clone()
-    }
-
-    pub async fn is_monitoring_active(&self) -> bool {
-        *self.monitoring_active.read().await
     }
 }

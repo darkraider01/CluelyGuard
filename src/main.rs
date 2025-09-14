@@ -67,45 +67,50 @@ async fn main() -> Result<()> {
 
 fn load_icon() -> egui::IconData {
     // Create a simple default icon if the file doesn't exist
-    let icon_bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/icon.png"));
-
-    match image::load_from_memory(icon_bytes) {
-        Ok(image) => {
-            let rgba_image = image.to_rgba8();
-            let (width, height) = rgba_image.dimensions();
-            egui::IconData {
-                rgba: rgba_image.into_raw(),
-                width: width as u32,
-                height: height as u32,
-            }
-        }
-        Err(_) => {
-            // Fallback: create a simple 32x32 blue icon
-            let size = 32;
-            let mut rgba = Vec::with_capacity(size * size * 4);
-            for y in 0..size {
-                for x in 0..size {
-                    // Create a simple shield-like pattern
-                    let center_x = size / 2;
-                    let center_y = size / 2;
-                    let dist = ((x as i32 - center_x as i32).pow(2) + (y as i32 - center_y as i32).pow(2)) as f32;
-                    let max_dist = (size / 2) as f32;
-
-                    if dist <= max_dist * max_dist {
-                        // Blue shield
-                        rgba.extend_from_slice(&[0, 100, 200, 255]);
-                    } else {
-                        // Transparent
-                        rgba.extend_from_slice(&[0, 0, 0, 0]);
+    match std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/icon.png")) {
+        Ok(icon_bytes) => {
+            match image::load_from_memory(&icon_bytes) {
+                Ok(image) => {
+                    let rgba_image = image.to_rgba8();
+                    let (width, height) = rgba_image.dimensions();
+                    egui::IconData {
+                        rgba: rgba_image.into_raw(),
+                        width: width as u32,
+                        height: height as u32,
                     }
                 }
-            }
-
-            egui::IconData {
-                rgba,
-                width: size as u32,
-                height: size as u32,
+                Err(_) => create_fallback_icon(),
             }
         }
+        Err(_) => create_fallback_icon(),
+    }
+}
+
+fn create_fallback_icon() -> egui::IconData {
+    // Fallback: create a simple 32x32 blue shield icon
+    let size = 32;
+    let mut rgba = Vec::with_capacity(size * size * 4);
+    for y in 0..size {
+        for x in 0..size {
+            // Create a simple shield-like pattern
+            let center_x = size / 2;
+            let center_y = size / 2;
+            let dist = ((x as i32 - center_x as i32).pow(2) + (y as i32 - center_y as i32).pow(2)) as f32;
+            let max_dist = (size / 2) as f32;
+            
+            if dist <= max_dist * max_dist {
+                // Blue shield
+                rgba.extend_from_slice(&[0, 100, 200, 255]);
+            } else {
+                // Transparent
+                rgba.extend_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+    }
+    
+    egui::IconData {
+        rgba,
+        width: size as u32,
+        height: size as u32,
     }
 }

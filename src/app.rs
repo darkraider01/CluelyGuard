@@ -9,8 +9,7 @@ use chrono::{DateTime, Utc};
 
 use crate::config::Config;
 use crate::detection::{DetectionEngine, DetectionEvent, ThreatLevel};
-use crate::gui::{DashboardTab, ModulesTab};
-// use crate::gui::{LogsTab, SettingsTab, ReportsTab}; // Not yet implemented
+use crate::gui::{DashboardTab, ModulesTab, LogsTab, SettingsTab, ReportsTab};
 
 pub struct CluelyGuardApp {
     config: Config,
@@ -27,6 +26,9 @@ pub struct CluelyGuardApp {
     // Tab Components
     dashboard: DashboardTab,
     modules: ModulesTab,
+    logs_tab: LogsTab,
+    settings_tab: SettingsTab,
+    reports_tab: ReportsTab,
 
     // UI State
     show_settings_modal: bool,
@@ -71,6 +73,9 @@ impl CluelyGuardApp {
             // Initialize tab components
             dashboard: DashboardTab::new(),
             modules: ModulesTab::new(config.clone()),
+            logs_tab: LogsTab::new(),
+            settings_tab: SettingsTab::new(config.clone()),
+            reports_tab: ReportsTab::new(),
 
             show_settings_modal: false,
             show_about_modal: false,
@@ -121,7 +126,7 @@ impl CluelyGuardApp {
         self.add_notification(
             "Monitoring Stopped".to_string(),
             "CluelyGuard monitoring has been stopped".to_string(),
-            ThreatLevel::Info, // Changed from Warning to Info
+            ThreatLevel::Info,
         );
     }
 
@@ -140,6 +145,10 @@ impl CluelyGuardApp {
 
     pub fn handle_detection_event(&mut self, event: DetectionEvent) {
         self.detection_count += 1;
+        
+        // Add to logs tab
+        self.logs_tab.add_log_entry(&event);
+        
         self.recent_events.insert(0, event.clone());
 
         // Keep only last 50 events
@@ -151,11 +160,11 @@ impl CluelyGuardApp {
         self.add_notification(
             "Threat Detected!".to_string(),
             format!("{}: {}", event.detection_type, event.description),
-            event.threat_level.clone(), // Clone here for add_notification
+            event.threat_level.clone(),
         );
 
         // Log the event
-        match event.threat_level.clone() { // Clone threat_level here
+        match event.threat_level.clone() {
             ThreatLevel::Critical => error!("DETECTION: {}", event.description),
             ThreatLevel::High => warn!("DETECTION: {}", event.description),
             ThreatLevel::Medium => warn!("DETECTION: {}", event.description),
@@ -170,7 +179,7 @@ impl CluelyGuardApp {
             // File menu
             ui.menu_button("File", |ui| {
                 if ui.button("Settings").clicked() {
-                    self.show_settings_modal = true;
+                    self.current_tab = AppTab::Settings;
                     ui.close_menu();
                 }
 
@@ -193,6 +202,10 @@ impl CluelyGuardApp {
                 }
                 if ui.button("Logs").clicked() {
                     self.current_tab = AppTab::Logs;
+                    ui.close_menu();
+                }
+                if ui.button("Settings").clicked() {
+                    self.current_tab = AppTab::Settings;
                     ui.close_menu();
                 }
                 if ui.button("Reports").clicked() {
@@ -284,9 +297,9 @@ impl CluelyGuardApp {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.current_tab, AppTab::Dashboard, "📊 Dashboard");
             ui.selectable_value(&mut self.current_tab, AppTab::Modules, "🔧 Modules");
-            // ui.selectable_value(&mut self.current_tab, AppTab::Logs, "📝 Logs"); // Commented out
-            // ui.selectable_value(&mut self.current_tab, AppTab::Settings, "⚙️ Settings"); // Commented out
-            // ui.selectable_value(&mut self.current_tab, AppTab::Reports, "📈 Reports"); // Commented out
+            ui.selectable_value(&mut self.current_tab, AppTab::Logs, "📝 Logs");
+            ui.selectable_value(&mut self.current_tab, AppTab::Settings, "⚙️ Settings");
+            ui.selectable_value(&mut self.current_tab, AppTab::Reports, "📈 Reports");
         });
 
         ui.separator();
@@ -306,37 +319,19 @@ impl CluelyGuardApp {
             AppTab::Modules => {
                 self.modules.render(ui, &mut self.config);
             }
-            AppTab::Logs => { /* Not implemented yet */ }
-            AppTab::Settings => { /* Not implemented yet */ }
-            AppTab::Reports => { /* Not implemented yet */ }
+            AppTab::Logs => {
+                self.logs_tab.render(ui);
+            }
+            AppTab::Settings => {
+                self.settings_tab.render(ui, &mut self.config);
+            }
+            AppTab::Reports => {
+                self.reports_tab.render(ui, &self.recent_events);
+            }
         }
     }
 
     fn render_modals(&mut self, ctx: &egui::Context) {
-        // Settings modal (commented out as fields are removed)
-        // if self.show_settings_modal {
-        //     egui::Window::new("Settings")
-        //         .collapsible(false)
-        //         .resizable(true)
-        //         .default_size(egui::vec2(600.0, 400.0))
-        //         .show(ctx, |ui| {
-        //             self.settings.render(ui, &mut self.config);
-
-        //             ui.separator();
-
-        //             ui.horizontal(|ui| {
-        //                 if ui.button("Save").clicked() {
-        //                     let _ = self.config.save();
-        //                     self.show_settings_modal = false;
-        //                 }
-
-        //                 if ui.button("Cancel").clicked() {
-        //                     self.show_settings_modal = false;
-        //                 }
-        //             });
-        //         });
-        // }
-
         // About modal
         if self.show_about_modal {
             egui::Window::new("About CluelyGuard")
