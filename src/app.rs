@@ -3,7 +3,7 @@
 use anyhow::Result;
 use eframe::egui;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn, error};
 use chrono::{DateTime, Utc};
 
@@ -12,13 +12,9 @@ use crate::detection::{DetectionEngine, DetectionEvent, ThreatLevel};
 use crate::gui::{DashboardTab, ModulesTab};
 // use crate::gui::{LogsTab, SettingsTab, ReportsTab}; // Not yet implemented
 
-use tokio::sync::mpsc;
-
-#[derive(Clone)]
 pub struct CluelyGuardApp {
     config: Config,
     detection_engine: Arc<RwLock<DetectionEngine>>,
-    event_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<DetectionEvent>>>, // Receiver for detection events
 
     // GUI State
     current_tab: AppTab,
@@ -26,6 +22,7 @@ pub struct CluelyGuardApp {
     start_time: Option<DateTime<Utc>>,
     detection_count: usize,
     recent_events: Vec<DetectionEvent>,
+    event_rx: mpsc::Receiver<DetectionEvent>,
 
     // Tab Components
     dashboard: DashboardTab,
@@ -47,7 +44,6 @@ pub enum AppTab {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Temporarily allow dead code for the 'level' field
 pub struct Notification {
     pub id: uuid::Uuid,
     pub title: String,
@@ -66,7 +62,6 @@ impl CluelyGuardApp {
         Ok(Self {
             config: config.clone(),
             detection_engine: detection_engine.clone(),
-            event_rx: Arc::new(tokio::sync::Mutex::new(event_rx)),
             current_tab: AppTab::Dashboard,
             monitoring_active: false,
             start_time: None,
@@ -80,6 +75,7 @@ impl CluelyGuardApp {
             show_settings_modal: false,
             show_about_modal: false,
             notification_queue: Vec::new(),
+            event_rx,
         })
     }
 
@@ -99,7 +95,7 @@ impl CluelyGuardApp {
         // Start detection engine
         let engine = self.detection_engine.clone();
         tokio::spawn(async move {
-            if let Err(e) = (*engine.write().await).start_monitoring().await {
+            if let Err(e) = engine.write().await.start_monitoring().await {
                 error!("Failed to start monitoring: {}", e);
             }
         });
@@ -118,7 +114,7 @@ impl CluelyGuardApp {
         // Stop detection engine
         let engine = self.detection_engine.clone();
         tokio::spawn(async move {
-            (*engine.write().await).stop_monitoring().await;
+            engine.write().await.stop_monitoring().await;
         });
 
         info!("Monitoring stopped");
@@ -142,7 +138,6 @@ impl CluelyGuardApp {
         self.notification_queue.push(notification);
     }
 
-    #[allow(dead_code)] // Temporarily allow dead code as it's intended to be called by DetectionEngine
     pub fn handle_detection_event(&mut self, event: DetectionEvent) {
         self.detection_count += 1;
         self.recent_events.insert(0, event.clone());
@@ -419,7 +414,7 @@ impl CluelyGuardApp {
     fn perform_quick_scan(&mut self) {
         let engine = self.detection_engine.clone();
         tokio::spawn(async move {
-            if let Err(e) = (*engine.write().await).perform_scan().await {
+            if let Err(e) = engine.write().await.perform_scan().await {
                 error!("Quick scan failed: {}", e);
             }
         });
@@ -435,16 +430,15 @@ impl CluelyGuardApp {
 impl eframe::App for CluelyGuardApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Handle detection events from the engine
-        let event_rx = self.event_rx.clone();
-        let mut app_clone = self.clone(); // Clone self for use in the async block
-        let ctx_clone = ctx.clone();
+        // Process incoming detection events
+        let mut events_to_process = Vec::new();
+        while let Ok(event) = self.event_rx.try_recv() {
+            events_to_process.push(event);
+        }
 
-        tokio::spawn(async move {
-            if let Some(event) = event_rx.lock().await.recv().await {
-                app_clone.handle_detection_event(event);
-                ctx_clone.request_repaint();
-            }
-        });
+        for event in events_to_process {
+            self.handle_detection_event(event);
+        }
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             self.render_menu_bar(ui);

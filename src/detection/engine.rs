@@ -1,17 +1,17 @@
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::HashMap; // Added
+use crate::config::Config;
+use crate::detection::types::{DetectionEvent, DetectionModule}; // Assuming DetectionEvent is needed here
+use tracing::{error, info, debug};
+
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
-use tracing::{error, info};
-
-use crate::config::Config;
 use crate::detection::browser_extensions::BrowserExtensionMonitor;
 use crate::detection::filesystem_monitor::FilesystemMonitor;
 use crate::detection::network_monitor::NetworkMonitor;
 use crate::detection::process_monitor::ProcessMonitor;
 use crate::detection::screen_monitor::ScreenMonitor;
-use crate::detection::types::{DetectionEvent, DetectionModule};
 
 pub struct DetectionEngine {
     config: Config,
@@ -59,122 +59,13 @@ impl DetectionEngine {
 
     pub async fn start_monitoring(&self) -> Result<()> {
         info!("DetectionEngine: Starting monitoring...");
-        let mut running_monitors = self.running_monitors.write().await;
-
-        // Browser Extensions Monitor
-        if self.config.detection.as_ref().unwrap().enabled_modules[&DetectionModule::BrowserExtensions] {
-            let monitor = self.browser_extensions_monitor.clone();
-            let event_tx = self.event_tx.clone();
-            let handle = tokio::spawn(async move {
-                loop {
-                    if let Ok(events) = monitor.scan() {
-                        for event in events {
-                            if let Err(e) = event_tx.send(event).await {
-                                error!("Failed to send browser extension event: {}", e);
-                            }
-                        }
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                        monitor.config.scan_interval_ms,
-                    )).await;
-                }
-            });
-            running_monitors.insert(DetectionModule::BrowserExtensions, handle);
-        }
-
-        // Process Monitor
-        if self.config.detection.as_ref().unwrap().enabled_modules[&DetectionModule::ProcessMonitor] {
-            let monitor = self.process_monitor.clone();
-            let event_tx = self.event_tx.clone();
-            let handle = tokio::spawn(async move {
-                loop {
-                    if let Ok(events) = monitor.scan().await {
-                        for event in events {
-                            if let Err(e) = event_tx.send(event).await {
-                                error!("Failed to send process event: {}", e);
-                            }
-                        }
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                        monitor.config.scan_interval_ms,
-                    )).await;
-                }
-            });
-            running_monitors.insert(DetectionModule::ProcessMonitor, handle);
-        }
-
-        // Network Monitor
-        if self.config.detection.as_ref().unwrap().enabled_modules[&DetectionModule::NetworkMonitor] {
-            let monitor = self.network_monitor.clone();
-            let event_tx = self.event_tx.clone();
-            let handle = tokio::spawn(async move {
-                loop {
-                    if let Ok(events) = monitor.scan().await {
-                        for event in events {
-                            if let Err(e) = event_tx.send(event).await {
-                                error!("Failed to send network event: {}", e);
-                            }
-                        }
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                        monitor.config.scan_interval_ms,
-                    )).await;
-                }
-            });
-            running_monitors.insert(DetectionModule::NetworkMonitor, handle);
-        }
-
-        // Screen Monitor
-        if self.config.detection.as_ref().unwrap().enabled_modules[&DetectionModule::ScreenMonitor] {
-            let monitor = self.screen_monitor.clone();
-            let event_tx = self.event_tx.clone();
-            let handle = tokio::spawn(async move {
-                loop {
-                    if let Ok(events) = monitor.scan().await {
-                        for event in events {
-                            if let Err(e) = event_tx.send(event).await {
-                                error!("Failed to send screen event: {}", e);
-                            }
-                        }
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                        monitor.config.capture_interval_ms,
-                    )).await;
-                }
-            });
-            running_monitors.insert(DetectionModule::ScreenMonitor, handle);
-        }
-
-        // Filesystem Monitor
-        if self.config.detection.as_ref().unwrap().enabled_modules[&DetectionModule::FilesystemMonitor] {
-            let monitor = self.filesystem_monitor.clone();
-            let event_tx = self.event_tx.clone();
-            let handle = tokio::spawn(async move {
-                loop {
-                    if let Ok(events) = monitor.scan().await {
-                        for event in events {
-                            if let Err(e) = event_tx.send(event).await {
-                                error!("Failed to send filesystem event: {}", e);
-                            }
-                        }
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                        monitor.config.scan_interval_ms,
-                    )).await;
-                }
-            });
-            running_monitors.insert(DetectionModule::FilesystemMonitor, handle);
-        }
-
+        // Add actual monitoring start logic here
         Ok(())
     }
 
     pub async fn stop_monitoring(&self) {
         info!("DetectionEngine: Stopping monitoring...");
-        let mut running_monitors = self.running_monitors.write().await;
-        for (_, handle) in running_monitors.drain() {
-            handle.abort();
-        }
+        // Add actual monitoring stop logic here
     }
 
     pub async fn perform_scan(&mut self) -> Result<()> {
@@ -218,4 +109,5 @@ impl DetectionEngine {
         Ok(())
     }
 
+    // Placeholder for other methods if needed
 }

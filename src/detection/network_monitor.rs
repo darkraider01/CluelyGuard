@@ -14,7 +14,6 @@ use super::{DetectionEvent, DetectionDetails, DetectionModule, ThreatLevel, Netw
 pub struct NetworkMonitor {
     pub config: NetworkMonitorConfig,
     resolver: Option<TokioAsyncResolver>,
-    #[allow(dead_code)]
     ai_domain_set: HashSet<String>,
     blocked_ip_set: HashSet<IpAddr>,
 }
@@ -71,6 +70,16 @@ impl NetworkMonitor {
         Ok(events)
     }
 
+    pub fn update_config(&mut self, config: NetworkMonitorConfig) -> Result<()> {
+        self.ai_domain_set = config.ai_domains.iter().cloned().collect();
+        self.blocked_ip_set = config
+            .blocked_ips
+            .iter()
+            .filter_map(|ip_str| ip_str.parse().ok())
+            .collect();
+        self.config = config;
+        Ok(())
+    }
 
     async fn analyze_connection(&self, socket: &SocketInfo) -> Option<DetectionEvent> {
         let (local_ip, local_port, remote_ip_option, remote_port_option, protocol_str) = match &socket.protocol_socket_info {

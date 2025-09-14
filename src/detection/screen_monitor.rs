@@ -3,13 +3,13 @@
 use anyhow::Result;
 use chrono::Utc;
 use std::collections::HashMap;
-use tracing::error;
+use tracing::warn;
 
 use super::{DetectionEvent, DetectionDetails, DetectionModule, ThreatLevel, ScreenMonitorConfig};
 
 #[derive(Clone)]
 pub struct ScreenMonitor {
-    pub config: ScreenMonitorConfig,
+    config: ScreenMonitorConfig,
 }
 
 impl ScreenMonitor {
@@ -18,7 +18,7 @@ impl ScreenMonitor {
     }
 
     pub async fn scan(&self) -> Result<Vec<DetectionEvent>> {
-        let mut events = Vec::new();
+        let events = Vec::new();
 
         if !self.config.enabled {
             return Ok(events);
@@ -38,10 +38,16 @@ impl ScreenMonitor {
         Ok(events)
     }
 
+    pub fn update_config(&mut self, config: ScreenMonitorConfig) -> Result<()> {
+        self.config = config;
+        Ok(())
+    }
 
     #[cfg(feature = "screen-monitoring")]
     async fn capture_and_analyze_screen(&self) -> Result<Vec<DetectionEvent>> {
         use screenshots::Screen;
+        use image::ImageFormat;
+        use std::io::Cursor;
 
         let mut events = Vec::new();
         let screens = Screen::all()?;
@@ -153,10 +159,10 @@ impl ScreenMonitor {
             "stop generating", "OpenAI", "Anthropic"
         ];
 
-        let detected_text = Vec::new();
+        let mut detected_text = Vec::new();
 
         // Simulate OCR detection (replace with actual OCR implementation)
-        for _keyword in &ai_keywords {
+        for keyword in &ai_keywords {
             // This would be replaced with actual OCR text extraction
             // detected_text.push(format!("OCR detected: {}", keyword));
         }

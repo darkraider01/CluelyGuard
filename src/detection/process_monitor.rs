@@ -73,6 +73,10 @@ impl ProcessMonitor {
         Ok(events)
     }
 
+    pub fn update_config(&mut self, config: ProcessMonitorConfig) -> Result<()> {
+        self.config = config;
+        Ok(())
+    }
 
     fn is_suspicious_process_name(&self, process_name: &str) -> bool {
         let suspicious_keywords = [

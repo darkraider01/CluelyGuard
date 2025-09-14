@@ -4,15 +4,15 @@ use anyhow::Result;
 use chrono::Utc;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use super::{DetectionEvent, DetectionDetails, DetectionModule, ThreatLevel, FilesystemMonitorConfig};
 
 #[derive(Clone)]
 pub struct FilesystemMonitor {
-    pub config: FilesystemMonitorConfig,
+    config: FilesystemMonitorConfig,
 }
 
 impl FilesystemMonitor {
@@ -34,7 +34,6 @@ impl FilesystemMonitor {
         Ok(events)
     }
 
-    #[allow(dead_code)]
     pub async fn start_watching(&self) -> Result<mpsc::Receiver<DetectionEvent>> {
         let (tx, rx) = mpsc::channel(1000);
         let config = self.config.clone();
@@ -48,8 +47,11 @@ impl FilesystemMonitor {
         Ok(rx)
     }
 
+    pub fn update_config(&mut self, config: FilesystemMonitorConfig) -> Result<()> {
+        self.config = config;
+        Ok(())
+    }
 
-    #[allow(dead_code)]
     async fn watch_filesystem(
         config: FilesystemMonitorConfig,
         tx: mpsc::Sender<DetectionEvent>,
@@ -85,7 +87,6 @@ impl FilesystemMonitor {
         Ok(())
     }
 
-    #[allow(dead_code)]
     async fn analyze_filesystem_event(
         config: &FilesystemMonitorConfig,
         event: Event,

@@ -54,7 +54,6 @@ async fn main() -> Result<()> {
     // Create and run the application
     let app = CluelyGuardApp::new(config, detection_engine, event_rx).await?;
 
-
     eframe::run_native(
         "CluelyGuard",
         options,

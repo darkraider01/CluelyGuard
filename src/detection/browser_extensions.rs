@@ -5,16 +5,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::{debug, warn};
 use walkdir::WalkDir;
+use json::JsonValue;
 
 use crate::detection::types::{
     DetectionEvent, DetectionDetails, DetectionModule, ThreatLevel,
     BrowserExtensionConfig, DetectionConfig,
 };
 
-#[derive(Clone)]
 pub struct BrowserExtensionMonitor {
-    pub config: BrowserExtensionConfig,
-    #[allow(dead_code)]
+    config: BrowserExtensionConfig,
     detection_config: DetectionConfig,
 }
 
@@ -148,8 +147,17 @@ impl BrowserExtensionMonitor {
     fn get_chrome_extension_paths(&self) -> Vec<PathBuf> {
         let mut paths = Vec::new();
         if let Some(app_data) = dirs::data_local_dir() {
-            paths.push(app_data.join("Google\\Chrome\\User Data\\Default\\Extensions"));
-            // Add paths for other profiles if needed
+            paths.push(app_data.join(r"Google\Chrome\User Data\Default\Extensions"));
+            paths.push(app_data.join(r"Google\Chrome\User Data\Profile 1\Extensions"));
+            paths.push(app_data.join(r"Google\Chrome\User Data\Guest Profile\Extensions"));
+
+            // Chrome Beta, Dev, Canary
+            paths.push(app_data.join(r"Google\Chrome Beta\User Data\Default\Extensions"));
+            paths.push(app_data.join(r"Google\Chrome Dev\User Data\Default\Extensions"));
+            paths.push(app_data.join(r"Google\Chrome SxS\User Data\Default\Extensions"));
+
+            // Portable Chrome installations
+            paths.push(PathBuf::from(r"C:\PortableApps\GoogleChromePortable\Data\profile\Default\Extensions"));
         }
         paths
     }
@@ -159,6 +167,10 @@ impl BrowserExtensionMonitor {
         let mut paths = Vec::new();
         if let Some(app_data) = dirs::home_dir() {
             paths.push(app_data.join("Library/Application Support/Google/Chrome/Default/Extensions"));
+            paths.push(app_data.join("Library/Application Support/Google/Chrome/Profile 1/Extensions"));
+            paths.push(app_data.join("Library/Application Support/Google/Chrome Beta/Default/Extensions"));
+            paths.push(app_data.join("Library/Application Support/Google/Chrome Dev/Default/Extensions"));
+            paths.push(app_data.join("Library/Application Support/Google/Chrome Canary/Default/Extensions"));
         }
         paths
     }
@@ -168,6 +180,15 @@ impl BrowserExtensionMonitor {
         let mut paths = Vec::new();
         if let Some(config_dir) = dirs::config_dir() {
             paths.push(config_dir.join("google-chrome/Default/Extensions"));
+            paths.push(config_dir.join("google-chrome-beta/Default/Extensions"));
+            paths.push(config_dir.join("google-chrome-unstable/Default/Extensions"));
+            paths.push(config_dir.join("chromium/Default/Extensions"));
+        }
+
+        if let Some(home) = dirs::home_dir() {
+            // Snap installations
+            paths.push(home.join("snap/chromium/common/chromium/Default/Extensions"));
+            paths.push(home.join("snap/chrome/common/chrome/Default/Extensions"));
         }
         paths
     }
@@ -182,7 +203,7 @@ impl BrowserExtensionMonitor {
         let mut paths = Vec::new();
         if let Some(app_data) = dirs::app_data_dir() {
             // Firefox profiles are complex, this is a simplified path
-            if let Some(profiles_dir) = app_data.join("Mozilla\\Firefox\\Profiles").read_dir().ok() {
+            if let Some(profiles_dir) = app_data.join(r"Mozilla\Firefox\Profiles").read_dir().ok() {
                 for entry in profiles_dir.filter_map(|e| e.ok()) {
                     if entry.file_type().map_or(false, |f| f.is_dir()) {
                         paths.push(entry.path().join("extensions"));
@@ -232,7 +253,7 @@ impl BrowserExtensionMonitor {
     fn get_edge_extension_paths(&self) -> Vec<PathBuf> {
         let mut paths = Vec::new();
         if let Some(app_data) = dirs::data_local_dir() {
-            paths.push(app_data.join("Microsoft\\Edge\\User Data\\Default\\Extensions"));
+            paths.push(app_data.join(r"Microsoft\Edge\User Data\Default\Extensions"));
         }
         paths
     }

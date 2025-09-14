@@ -295,7 +295,7 @@ impl Default for ScreenMonitorConfig {
 impl Default for FilesystemMonitorConfig {
     fn default() -> Self {
         Self {
-            scan_interval_ms: 5000,
+            scan_interval_ms: 1000,
             watch_directories: vec![
                 dirs::download_dir().unwrap_or_default().to_string_lossy().to_string(),
                 dirs::document_dir().unwrap_or_default().to_string_lossy().to_string(),
@@ -320,7 +320,6 @@ impl Default for FilesystemMonitorConfig {
 }
 
 impl ThreatLevel {
-    #[allow(dead_code)]
     pub fn color(&self) -> egui::Color32 {
         match self {
             ThreatLevel::Critical => egui::Color32::from_rgb(220, 53, 69),   // Red
@@ -332,7 +331,6 @@ impl ThreatLevel {
         }
     }
 
-    #[allow(dead_code)]
     pub fn icon(&self) -> &'static str {
         match self {
             ThreatLevel::Critical => "🚨",
@@ -356,7 +354,6 @@ impl DetectionModule {
         }
     }
 
-    #[allow(dead_code)]
     pub fn icon(&self) -> &'static str {
         match self {
             DetectionModule::BrowserExtensions => "🌐",
