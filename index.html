@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CluelyGuard - Web Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #ffffff;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 1rem 2rem;
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .status-active {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .status-inactive {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: auto auto auto;
+            gap: 1.5rem;
+            min-height: calc(100vh - 100px);
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 48px rgba(0, 0, 0, 0.2);
+        }
+
+        .card h3 {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            color: #e2e8f0;
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 0.75rem 0;
+        }
+
+        .metric-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .threat-critical { color: #ef4444; }
+        .threat-high { color: #f97316; }
+        .threat-medium { color: #eab308; }
+        .threat-low { color: #22c55e; }
+
+        .overview-card {
+            grid-column: 1 / -1;
+        }
+
+        .overview-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .stat-box {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 1rem;
+            border-radius: 12px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            opacity: 0.8;
+        }
+
+        .events-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 1rem;
+        }
+
+        .event-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.75rem;
+            margin: 0.5rem 0;
+            border-radius: 8px;
+            border-left: 4px solid;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            font-size: 0.875rem;
+        }
+
+        .event-item.critical { border-color: #ef4444; }
+        .event-item.high { border-color: #f97316; }
+        .event-item.medium { border-color: #eab308; }
+        .event-item.low { border-color: #22c55e; }
+
+        .event-description {
+            flex: 1;
+            margin-right: 1rem;
+        }
+
+        .event-time {
+            opacity: 0.7;
+            font-size: 0.75rem;
+            white-space: nowrap;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            margin: 1rem 0;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            background: rgba(59, 130, 246, 0.8);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn:hover {
+            background: rgba(59, 130, 246, 1);
+            transform: translateY(-1px);
+        }
+
+        .btn-success { background: rgba(34, 197, 94, 0.8); }
+        .btn-success:hover { background: rgba(34, 197, 94, 1); }
+
+        .btn-danger { background: rgba(239, 68, 68, 0.8); }
+        .btn-danger:hover { background: rgba(239, 68, 68, 1); }
+
+        .btn-secondary { background: rgba(107, 114, 128, 0.8); }
+        .btn-secondary:hover { background: rgba(107, 114, 128, 1); }
+
+        .progress-bar {
+            background: rgba(255, 255, 255, 0.1);
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #22c55e, #3b82f6);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid #ffffff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .chart-container {
+            height: 200px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            margin: 1rem 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.875rem;
+            opacity: 0.7;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+                padding: 1rem;
+                gap: 1rem;
+            }
+            
+            .header {
+                padding: 1rem;
+            }
+            
+            .controls {
+                flex-direction: column;
+            }
+            
+            .overview-stats {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>
+            🛡️ CluelyGuard
+            <span id="status-badge" class="status-badge status-inactive">
+                <span class="loading"></span> Connecting...
+            </span>
+        </h1>
+    </header>
+
+    <div class="container">
+        <!-- System Overview -->
+        <div class="card overview-card">
+            <h3>📊 System Overview</h3>
+            <div class="controls">
+                <button id="start-btn" class="btn btn-success">
+                    ▶️ Start Monitoring
+                </button>
+                <button id="stop-btn" class="btn btn-danger">
+                    🛑 Stop Monitoring
+                </button>
+                <button id="scan-btn" class="btn">
+                    🔍 Quick Scan
+                </button>
+                <button id="refresh-btn" class="btn btn-secondary">
+                    🔄 Refresh
+                </button>
+            </div>
+            <div class="overview-stats">
+                <div class="stat-box">
+                    <div id="total-detections" class="stat-number">0</div>
+                    <div class="stat-label">Total Detections</div>
+                </div>
+                <div class="stat-box">
+                    <div id="uptime" class="stat-number">0h</div>
+                    <div class="stat-label">Uptime</div>
+                </div>
+                <div class="stat-box">
+                    <div id="cpu-usage" class="stat-number">0%</div>
+                    <div class="stat-label">CPU Usage</div>
+                </div>
+                <div class="stat-box">
+                    <div id="memory-usage" class="stat-number">0MB</div>
+                    <div class="stat-label">Memory Usage</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Threat Levels -->
+        <div class="card">
+            <h3>🚨 Threat Levels</h3>
+            <div class="metric">
+                <span>Critical</span>
+                <span id="critical-count" class="metric-value threat-critical">0</span>
+            </div>
+            <div class="metric">
+                <span>High</span>
+                <span id="high-count" class="metric-value threat-high">0</span>
+            </div>
+            <div class="metric">
+                <span>Medium</span>
+                <span id="medium-count" class="metric-value threat-medium">0</span>
+            </div>
+            <div class="metric">
+                <span>Low</span>
+                <span id="low-count" class="metric-value threat-low">0</span>
+            </div>
+        </div>
+
+        <!-- Detection Modules -->
+        <div class="card">
+            <h3>🔧 Detection Modules</h3>
+            <div class="metric">
+                <span>🌐 Browser Extensions</span>
+                <span id="browser-count" class="metric-value">0</span>
+            </div>
+            <div class="metric">
+                <span>⚙️ Process Monitor</span>
+                <span id="process-count" class="metric-value">0</span>
+            </div>
+            <div class="metric">
+                <span>🌍 Network Monitor</span>
+                <span id="network-count" class="metric-value">0</span>
+            </div>
+            <div class="metric">
+                <span>📁 Filesystem Monitor</span>
+                <span id="filesystem-count" class="metric-value">0</span>
+            </div>
+        </div>
+
+        <!-- System Resources -->
+        <div class="card">
+            <h3>💻 System Resources</h3>
+            <div class="metric">
+                <span>CPU Usage</span>
+                <span id="cpu-percent" class="metric-value">0%</span>
+            </div>
+            <div class="progress-bar">
+                <div id="cpu-bar" class="progress-fill" style="width: 0%"></div>
+            </div>
+            
+            <div class="metric">
+                <span>Memory Usage</span>
+                <span id="mem-usage" class="metric-value">0 MB</span>
+            </div>
+            <div class="progress-bar">
+                <div id="mem-bar" class="progress-fill" style="width: 0%"></div>
+            </div>
+            
+            <div class="metric">
+                <span>Network I/O</span>
+                <span id="network-io" class="metric-value">0 MB/s</span>
+            </div>
+        </div>
+
+        <!-- Detection Timeline -->
+        <div class="card">
+            <h3>📈 Detection Timeline</h3>
+            <div class="chart-container">
+                📊 Timeline chart will be rendered here
+            </div>
+        </div>
+
+        <!-- Recent Events -->
+        <div class="card">
+            <h3>📝 Recent Events</h3>
+            <div id="events-list" class="events-list">
+                <div class="event-item low">
+                    <div class="event-description">
+                        System started monitoring - All modules initialized
+                    </div>
+                    <div class="event-time">Just now</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class CluelyGuardDashboard {
+            constructor() {
+                this.apiBase = window.location.origin;
+                this.isMonitoring = false;
+                this.eventSource = null;
+                
+                this.initializeEventListeners();
+                this.startPolling();
+            }
+
+            initializeEventListeners() {
+                document.getElementById('start-btn').addEventListener('click', () => this.startMonitoring());
+                document.getElementById('stop-btn').addEventListener('click', () => this.stopMonitoring());
+                document.getElementById('scan-btn').addEventListener('click', () => this.performScan());
+                document.getElementById('refresh-btn').addEventListener('click', () => this.refreshData());
+            }
+
+            async apiCall(endpoint, method = 'GET', data = null) {
+                try {
+                    const options = {
+                        method,
+                        headers: {
+                            'Content-Type': 'application/json',
+                        }
+                    };
+                    
+                    if (data) {
+                        options.body = JSON.stringify(data);
+                    }
+                    
+                    const response = await fetch(`${this.apiBase}${endpoint}`, options);
+                    const result = await response.json();
+                    
+                    if (!result.success) {
+                        throw new Error(result.message);
+                    }
+                    
+                    return result.data;
+                } catch (error) {
+                    console.error('API call failed:', error);
+                    this.showNotification(`Error: ${error.message}`, 'error');
+                    throw error;
+                }
+            }
+
+            async startMonitoring() {
+                const btn = document.getElementById('start-btn');
+                btn.innerHTML = '<span class="loading"></span> Starting...';
+                btn.disabled = true;
+                
+                try {
+                    await this.apiCall('/api/v1/monitoring/start', 'POST');
+                    this.isMonitoring = true;
+                    this.updateStatus();
+                    this.showNotification('Monitoring started successfully', 'success');
+                } catch (error) {
+                    console.error('Failed to start monitoring:', error);
+                } finally {
+                    btn.innerHTML = '▶️ Start Monitoring';
+                    btn.disabled = false;
+                }
+            }
+
+            async stopMonitoring() {
+                const btn = document.getElementById('stop-btn');
+                btn.innerHTML = '<span class="loading"></span> Stopping...';
+                btn.disabled = true;
+                
+                try {
+                    await this.apiCall('/api/v1/monitoring/stop', 'POST');
+                    this.isMonitoring = false;
+                    this.updateStatus();
+                    this.showNotification('Monitoring stopped', 'info');
+                } catch (error) {
+                    console.error('Failed to stop monitoring:', error);
+                } finally {
+                    btn.innerHTML = '🛑 Stop Monitoring';
+                    btn.disabled = false;
+                }
+            }
+
+            async performScan() {
+                const btn = document.getElementById('scan-btn');
+                btn.innerHTML = '<span class="loading"></span> Scanning...';
+                btn.disabled = true;
+                
+                try {
+                    await this.apiCall('/api/v1/monitoring/scan', 'POST');
+                    this.showNotification('Quick scan completed', 'success');
+                    this.refreshData();
+                } catch (error) {
+                    console.error('Failed to perform scan:', error);
+                } finally {
+                    btn.innerHTML = '🔍 Quick Scan';
+                    btn.disabled = false;
+                }
+            }
+
+            async refreshData() {
+                try {
+                    const status = await this.apiCall('/api/v1/status');
+                    this.updateDashboard(status);
+                    
+                    const events = await this.apiCall('/api/v1/events?limit=10');
+                    this.updateRecentEvents(events);
+                } catch (error) {
+                    console.error('Failed to refresh data:', error);
+                }
+            }
+
+            updateStatus() {
+                const statusBadge = document.getElementById('status-badge');
+                if (this.isMonitoring) {
+                    statusBadge.className = 'status-badge status-active';
+                    statusBadge.innerHTML = '🟢 Active';
+                } else {
+                    statusBadge.className = 'status-badge status-inactive';
+                    statusBadge.innerHTML = '🔴 Inactive';
+                }
+            }
+
+            updateDashboard(status) {
+                if (!status) return;
+                
+                this.isMonitoring = status.active;
+                this.updateStatus();
+                
+                // Update overview stats
+                document.getElementById('total-detections').textContent = status.total_detections || 0;
+                document.getElementById('uptime').textContent = this.formatUptime(status.uptime_seconds || 0);
+                document.getElementById('cpu-usage').textContent = `${(status.system_resources?.cpu_usage || 0).toFixed(1)}%`;
+                document.getElementById('memory-usage').textContent = `${(status.system_resources?.memory_usage || 0).toFixed(0)}MB`;
+                
+                // Update threat levels
+                document.getElementById('critical-count').textContent = status.detections_by_level?.Critical || 0;
+                document.getElementById('high-count').textContent = status.detections_by_level?.High || 0;
+                document.getElementById('medium-count').textContent = status.detections_by_level?.Medium || 0;
+                document.getElementById('low-count').textContent = status.detections_by_level?.Low || 0;
+                
+                // Update module counts
+                document.getElementById('browser-count').textContent = status.detections_by_module?.BrowserExtensions || 0;
+                document.getElementById('process-count').textContent = status.detections_by_module?.ProcessMonitor || 0;
+                document.getElementById('network-count').textContent = status.detections_by_module?.NetworkMonitor || 0;
+                document.getElementById('filesystem-count').textContent = status.detections_by_module?.FilesystemMonitor || 0;
+                
+                // Update system resources
+                const cpuUsage = status.system_resources?.cpu_usage || 0;
+                const memUsage = status.system_resources?.memory_usage || 0;
+                const networkIO = status.system_resources?.network_usage || 0;
+                
+                document.getElementById('cpu-percent').textContent = `${cpuUsage.toFixed(1)}%`;
+                document.getElementById('cpu-bar').style.width = `${Math.min(cpuUsage, 100)}%`;
+                
+                document.getElementById('mem-usage').textContent = `${memUsage.toFixed(0)} MB`;
+                document.getElementById('mem-bar').style.width = `${Math.min(memUsage / 1024 * 100, 100)}%`;
+                
+                document.getElementById('network-io').textContent = `${networkIO.toFixed(1)} MB/s`;
+            }
+
+            updateRecentEvents(events) {
+                if (!Array.isArray(events)) return;
+                
+                const eventsList = document.getElementById('events-list');
+                eventsList.innerHTML = '';
+                
+                events.slice(0, 10).forEach(event => {
+                    const eventElement = document.createElement('div');
+                    eventElement.className = `event-item ${event.threat_level.toLowerCase()}`;
+                    
+                    eventElement.innerHTML = `
+                        <div class="event-description">
+                            <strong>${event.detection_type}</strong>: ${event.description}
+                        </div>
+                        <div class="event-time">${this.formatTime(event.timestamp)}</div>
+                    `;
+                    
+                    eventsList.appendChild(eventElement);
+                });
+                
+                if (events.length === 0) {
+                    eventsList.innerHTML = '<div style="text-align: center; opacity: 0.7;">No recent events</div>';
+                }
+            }
+
+            formatUptime(seconds) {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                return `${hours}h ${minutes}m`;
+            }
+
+            formatTime(timestamp) {
+                const date = new Date(timestamp);
+                return date.toLocaleTimeString();
+            }
+
+            showNotification(message, type) {
+                // Simple notification system - could be enhanced with a proper toast library
+                console.log(`${type.toUpperCase()}: ${message}`);
+                
+                // You could implement a proper notification system here
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: ${type === 'error' ? '#ef4444' : type === 'success' ? '#22c55e' : '#3b82f6'};
+                    color: white;
+                    padding: 1rem 1.5rem;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                    z-index: 1000;
+                    animation: slideIn 0.3s ease;
+                `;
+                
+                notification.textContent = message;
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    notification.style.animation = 'slideOut 0.3s ease';
+                    setTimeout(() => notification.remove(), 300);
+                }, 3000);
+            }
+
+            startPolling() {
+                // Initial load
+                this.refreshData();
+                
+                // Poll every 5 seconds
+                setInterval(() => {
+                    this.refreshData();
+                }, 5000);
+            }
+        }
+
+        // Add CSS animations
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+            }
+            
+            @keyframes slideOut {
+                from {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+                to {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Initialize dashboard when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new CluelyGuardDashboard();
+        });
+    </script>
+</body>
+</html>

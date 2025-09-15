@@ -162,7 +162,7 @@ impl LogsTab {
             ui.horizontal(|ui| {
                 ui.colored_label(color, icon);
                 ui.label(entry.timestamp.format("%Y-%m-%d %H:%M:%S").to_string());
-                ui.colored_label(color, format!("[{}]", entry.level as u8));
+                ui.colored_label(color, format!("[{}]", entry.level.clone() as u8));
                 ui.label(format!("[{}]", entry.module.name()));
             });
 

@@ -4,8 +4,7 @@ use anyhow::Result;
 use chrono::Utc;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::CreateKind, event::ModifyKind};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::{Path};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
@@ -332,7 +331,7 @@ impl FilesystemMonitor {
     async fn watch_filesystem(
         config: FilesystemMonitorConfig,
         ai_signatures: HashSet<String>,
-        content_patterns: Vec<String>,
+        _content_patterns: Vec<String>,
         tx: mpsc::Sender<DetectionEvent>,
     ) -> Result<()> {
         let (notify_tx, mut notify_rx) = mpsc::channel(1000);

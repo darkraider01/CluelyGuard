@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::{debug, warn};
 use walkdir::WalkDir;
-use json::JsonValue;
 
 use crate::detection::types::{
     DetectionEvent, DetectionDetails, DetectionModule, ThreatLevel,

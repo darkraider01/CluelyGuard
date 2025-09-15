@@ -9,7 +9,8 @@ use chrono::{DateTime, Utc};
 
 use crate::config::Config;
 use crate::detection::{DetectionEngine, DetectionEvent, ThreatLevel};
-use crate::gui::{DashboardTab, ModulesTab, LogsTab, SettingsTab, ReportsTab};
+use crate::gui::{ModulesTab, LogsTab, SettingsTab, ReportsTab};
+use crate::gui::dashboard_tab::DashboardTab;
 
 pub struct CluelyGuardApp {
     config: Config,

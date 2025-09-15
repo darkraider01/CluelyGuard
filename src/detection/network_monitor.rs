@@ -5,7 +5,7 @@ use chrono::Utc;
 use std::collections::HashMap;
 use tracing::{debug, warn, error};
 use trust_dns_resolver::TokioAsyncResolver;
-use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags};
+use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo};
 
 use crate::detection::types::{
     DetectionEvent, DetectionDetails, DetectionModule, ThreatLevel,
@@ -42,13 +42,26 @@ impl NetworkMonitor {
         match get_sockets_info(address_family, protocol_flags) {
             Ok(sockets) => {
                 for socket in sockets {
-                    if let Some(remote_addr) = &socket.remote_addr {
-                        // Check if connection is to a known AI service
-                        if let Some(event) = self.analyze_connection(&socket.local_addr.to_string(), 
-                                                                   &remote_addr.to_string(), 
-                                                                   remote_addr.port()).await? {
-                            events.push(event);
+                    let (local_addr_str, remote_addr_str, remote_port) = match socket.protocol_socket_info {
+                        ProtocolSocketInfo::Tcp(tcp_info) => {
+                            let local_addr = tcp_info.local_addr;
+                            let remote_addr = tcp_info.remote_addr;
+                            let remote_port = tcp_info.remote_port; // Get port directly from tcp_info
+                            (local_addr.to_string(), remote_addr.to_string(), remote_port)
+                        },
+                        ProtocolSocketInfo::Udp(udp_info) => {
+                            // UdpSocketInfo does not have a remote_addr field directly.
+                            // Skipping analysis for UDP sockets that require a remote address.
+                            continue;
+                        },
+                        _ => {
+                            continue; // Ignore other protocols for now
                         }
+                    };
+
+                    // Check if connection is to a known AI service
+                    if let Some(event) = self.analyze_connection(&local_addr_str, &remote_addr_str, remote_port).await? {
+                        events.push(event);
                     }
                 }
             }
@@ -77,7 +90,7 @@ impl NetworkMonitor {
                 None,
                 remote_port,
                 "TCP",
-                "Blocked IP detected",
+                "Blocked IP detected".to_string(),
                 ThreatLevel::High,
             )));
         }
