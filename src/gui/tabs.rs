@@ -3,6 +3,7 @@
 use eframe::egui;
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
+#[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
